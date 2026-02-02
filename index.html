@@ -51,11 +51,13 @@
                 <span id="cents-off">--</span>
                 <span>cents</span>
             </div>
-            <canvas id="pitch-canvas" width="460" height="150"></canvas>
-            <div class="pitch-legend">
-                <span class="legend-flat">Flat</span>
-                <span class="legend-target">Target: <strong id="target-note-label">A4</strong></span>
-                <span class="legend-sharp">Sharp</span>
+            <div class="canvas-container">
+                <div class="y-axis-labels">
+                    <span class="legend-sharp">Sharp</span>
+                    <span class="legend-target" id="target-note-label">A4</span>
+                    <span class="legend-flat">Flat</span>
+                </div>
+                <canvas id="pitch-canvas" width="460" height="150"></canvas>
             </div>
             <button id="start-btn" class="btn btn-record">Start</button>
             <div id="status" class="status"></div>

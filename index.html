@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Pitch Trainer</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Voice Pitch Trainer</h1>
+
+        <section class="note-section">
+            <h2>Reference Note</h2>
+            <div class="pitch-selector">
+                <select id="note-select">
+                    <option value="C">C</option>
+                    <option value="C#">C#</option>
+                    <option value="D">D</option>
+                    <option value="D#">D#</option>
+                    <option value="E">E</option>
+                    <option value="F">F</option>
+                    <option value="F#">F#</option>
+                    <option value="G">G</option>
+                    <option value="G#">G#</option>
+                    <option value="A" selected>A</option>
+                    <option value="A#">A#</option>
+                    <option value="B">B</option>
+                </select>
+                <select id="octave-select">
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="4" selected>4</option>
+                    <option value="5">5</option>
+                </select>
+            </div>
+            <div class="note-display">
+                <span id="note-name">A4</span>
+                <span id="note-freq">440 Hz</span>
+            </div>
+            <button id="play-note" class="btn btn-primary">Play Note</button>
+        </section>
+
+        <section class="record-section">
+            <h2>Your Turn</h2>
+            <div class="record-controls">
+                <button id="record-btn" class="btn btn-record">Start Recording</button>
+            </div>
+            <div id="status" class="status"></div>
+            <audio id="playback" controls style="display: none;"></audio>
+        </section>
+
+        <section id="visualizer-section" class="visualizer-section" style="display: none;">
+            <h2>Pitch Analysis</h2>
+            <div class="pitch-display">
+                <span id="detected-pitch">--</span>
+                <span id="detected-note">Hz</span>
+            </div>
+            <div class="cents-display">
+                <span id="cents-off">--</span>
+                <span>cents</span>
+            </div>
+            <canvas id="pitch-canvas" width="460" height="150"></canvas>
+            <div class="pitch-legend">
+                <span class="legend-flat">Flat</span>
+                <span class="legend-target">Target: <strong id="target-note-label">A4</strong></span>
+                <span class="legend-sharp">Sharp</span>
+            </div>
+        </section>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

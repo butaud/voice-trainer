@@ -10,7 +10,12 @@
     <div class="container">
         <h1>Voice Pitch Trainer</h1>
 
-        <section class="note-section">
+        <div class="mode-toggle">
+            <button id="mode-free" class="mode-btn active">Free Practice</button>
+            <button id="mode-sequence" class="mode-btn">Sequence Mode</button>
+        </div>
+
+        <section class="note-section free-practice-section">
             <h2>Reference Note</h2>
             <div class="pitch-selector">
                 <select id="note-select">
@@ -41,7 +46,7 @@
             <button id="play-note" class="btn btn-primary">Play Note</button>
         </section>
 
-        <section class="visualizer-section">
+        <section class="visualizer-section free-practice-section">
             <h2>Live Pitch</h2>
             <div class="pitch-display">
                 <span id="detected-pitch">--</span>
@@ -61,6 +66,37 @@
             </div>
             <button id="start-btn" class="btn btn-record">Start</button>
             <div id="status" class="status"></div>
+        </section>
+
+        <section class="sequence-section" style="display: none;">
+            <h2>Sequence Challenge</h2>
+            <div class="sequence-selector">
+                <select id="sequence-select">
+                    <option value="simple-scale">Simple Scale (C-E) - Beginner</option>
+                    <option value="octave-jump">Octave Jump - Beginner</option>
+                    <option value="major-arpeggio">Major Arpeggio - Intermediate</option>
+                    <option value="full-scale">Full Scale Up - Advanced</option>
+                </select>
+            </div>
+            <div class="sequence-preview">
+                <div id="preview-notes" class="preview-notes"></div>
+            </div>
+            <div class="sequence-buttons">
+                <button id="preview-btn" class="btn btn-primary">Preview</button>
+                <button id="go-btn" class="btn btn-record">Go</button>
+            </div>
+            <div class="sequence-canvas-container">
+                <canvas id="sequence-canvas" width="500" height="200"></canvas>
+            </div>
+            <div id="sequence-results" class="sequence-results" style="display: none;">
+                <div class="results-header">
+                    <span id="results-grade" class="results-grade">A</span>
+                    <span id="results-percent" class="results-percent">95%</span>
+                </div>
+                <div id="results-breakdown" class="results-breakdown"></div>
+                <button id="retry-btn" class="btn btn-primary">Try Again</button>
+            </div>
+            <div id="sequence-status" class="status"></div>
         </section>
     </div>
 

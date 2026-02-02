@@ -505,6 +505,8 @@ const modeSequenceBtn = document.getElementById('mode-sequence');
 const freePracticeSections = document.querySelectorAll('.free-practice-section');
 const sequenceSection = document.querySelector('.sequence-section');
 const sequenceSelect = document.getElementById('sequence-select');
+const startNoteSelect = document.getElementById('start-note-select');
+const startOctaveSelect = document.getElementById('start-octave-select');
 const previewNotesEl = document.getElementById('preview-notes');
 const previewBtn = document.getElementById('preview-btn');
 const goBtn = document.getElementById('go-btn');
@@ -542,16 +544,48 @@ function setMode(mode) {
     }
 }
 
-// Load sequence
+// Convert note + octave to semitone number (C0 = 0)
+function noteToSemitone(note, octave) {
+    return octave * 12 + noteNames.indexOf(note);
+}
+
+// Convert semitone number back to note + octave
+function semitoneToNote(semitone) {
+    const octave = Math.floor(semitone / 12);
+    const noteIndex = ((semitone % 12) + 12) % 12; // Handle negative values
+    return { note: noteNames[noteIndex], octave };
+}
+
+// Load sequence with transposition based on selected starting note
 function loadSequence(id) {
     const seq = sequences[id];
     if (!seq) return;
 
-    sequenceState.currentSequence = seq.notes.map(n => ({
-        ...n,
-        frequency: getFrequency(n.note, n.octave),
-        name: `${n.note}${n.octave}`
-    }));
+    // Get the original starting note and the user's selected starting note
+    const originalStart = seq.notes[0];
+    const originalSemitone = noteToSemitone(originalStart.note, originalStart.octave);
+
+    const selectedNote = startNoteSelect.value;
+    const selectedOctave = parseInt(startOctaveSelect.value);
+    const selectedSemitone = noteToSemitone(selectedNote, selectedOctave);
+
+    // Calculate transposition interval
+    const transposition = selectedSemitone - originalSemitone;
+
+    // Transpose all notes
+    sequenceState.currentSequence = seq.notes.map(n => {
+        const originalSemi = noteToSemitone(n.note, n.octave);
+        const transposedSemi = originalSemi + transposition;
+        const transposed = semitoneToNote(transposedSemi);
+
+        return {
+            ...n,
+            note: transposed.note,
+            octave: transposed.octave,
+            frequency: getFrequency(transposed.note, transposed.octave),
+            name: `${transposed.note}${transposed.octave}`
+        };
+    });
 
     renderPreviewNotes();
     sequenceResults.style.display = 'none';
@@ -1056,6 +1090,14 @@ modeFreeBtn.addEventListener('click', () => setMode('free'));
 modeSequenceBtn.addEventListener('click', () => setMode('sequence'));
 
 sequenceSelect.addEventListener('change', () => {
+    loadSequence(sequenceSelect.value);
+});
+
+startNoteSelect.addEventListener('change', () => {
+    loadSequence(sequenceSelect.value);
+});
+
+startOctaveSelect.addEventListener('change', () => {
     loadSequence(sequenceSelect.value);
 });
 

@@ -41,17 +41,8 @@
             <button id="play-note" class="btn btn-primary">Play Note</button>
         </section>
 
-        <section class="record-section">
-            <h2>Your Turn</h2>
-            <div class="record-controls">
-                <button id="record-btn" class="btn btn-record">Start Recording</button>
-            </div>
-            <div id="status" class="status"></div>
-            <audio id="playback" controls style="display: none;"></audio>
-        </section>
-
-        <section id="visualizer-section" class="visualizer-section" style="display: none;">
-            <h2>Pitch Analysis</h2>
+        <section class="visualizer-section">
+            <h2>Live Pitch</h2>
             <div class="pitch-display">
                 <span id="detected-pitch">--</span>
                 <span id="detected-note">Hz</span>
@@ -66,6 +57,8 @@
                 <span class="legend-target">Target: <strong id="target-note-label">A4</strong></span>
                 <span class="legend-sharp">Sharp</span>
             </div>
+            <button id="start-btn" class="btn btn-record">Start</button>
+            <div id="status" class="status"></div>
         </section>
     </div>
 

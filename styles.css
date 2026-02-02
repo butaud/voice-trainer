@@ -224,3 +224,11 @@ section {
 .legend-target {
     color: #6bcb77;
 }
+
+.visualizer-section .btn {
+    margin-top: 1rem;
+}
+
+.visualizer-section .status {
+    margin-top: 0.5rem;
+}

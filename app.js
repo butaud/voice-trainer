@@ -214,7 +214,10 @@ const sequenceState = {
     noteScores: [],
     pitchSamplesForNote: [],
     pitchHistory: [],          // Timeline history for visualization
-    timeOnPitch: 0
+    timeOnPitch: 0,
+    // For integrated sheet music visualization
+    sequenceStartTime: 0,      // When the sequence started (after countdown)
+    globalPitchTrace: []       // Array of {time, frequency, noteIndex} for entire sequence
 };
 
 function getFrequency(note, octave) {
@@ -1027,8 +1030,44 @@ function drawLedgerLines(ctx, x, y, staffTop, lineSpacing, clef) {
     ctx.restore();
 }
 
+// Calculate total sequence duration in ms
+function getSequenceTotalDuration() {
+    return sequenceState.currentSequence.reduce((sum, note) => sum + getAdjustedDuration(note.duration), 0);
+}
+
+// Get cumulative time up to (but not including) a note index
+function getCumulativeTime(upToIndex) {
+    let time = 0;
+    for (let i = 0; i < upToIndex && i < sequenceState.currentSequence.length; i++) {
+        time += getAdjustedDuration(sequenceState.currentSequence[i].duration);
+    }
+    return time;
+}
+
+// Convert frequency to Y position on staff
+function frequencyToStaffY(frequency, clef, staffTop, lineSpacing) {
+    // Convert frequency to note name and octave
+    const midiNote = 12 * Math.log2(frequency / 440) + 69;
+    const noteIndex = Math.round(midiNote) % 12;
+    const octave = Math.floor(Math.round(midiNote) / 12) - 1;
+    const noteName = noteNames[noteIndex];
+
+    // Get staff position and Y coordinate
+    const staffPos = getStaffPosition(noteName, octave);
+
+    // For smooth visualization, interpolate based on actual frequency deviation
+    const exactMidi = 12 * Math.log2(frequency / 440) + 69;
+    const deviation = exactMidi - Math.round(midiNote); // -0.5 to +0.5
+
+    const baseY = getYForStaffPosition(staffPos, clef, staffTop, lineSpacing);
+    // Each semitone is roughly half a staff position, adjust Y accordingly
+    const yAdjustment = -deviation * (lineSpacing / 2);
+
+    return baseY + yAdjustment;
+}
+
 // Main function to draw sheet music
-function drawSheetMusic(activeIndex = -1, completedUpTo = -1, noteScores = null) {
+function drawSheetMusic(activeIndex = -1, completedUpTo = -1, noteScores = null, playbackTime = -1, showFinalTrace = false, noteOffsetX = 0) {
     const canvas = sheetMusicCanvas;
     const ctx = sheetMusicCtx;
     const width = canvas.width;
@@ -1041,8 +1080,8 @@ function drawSheetMusic(activeIndex = -1, completedUpTo = -1, noteScores = null)
     const sequence = sequenceState.currentSequence;
     if (sequence.length === 0) return;
 
-    // Layout
-    const staffTop = 35;
+    // Layout - center staff vertically with room for pitch deviations
+    const staffTop = 55;
     const lineSpacing = 10;
     const clef = getBestClef(sequence);
     const clefWidth = 40;
@@ -1051,6 +1090,22 @@ function drawSheetMusic(activeIndex = -1, completedUpTo = -1, noteScores = null)
     const noteAreaWidth = width - leftMargin - clefWidth - rightMargin;
     const noteSpacing = Math.min(50, noteAreaWidth / sequence.length);
     const notesStartX = leftMargin + clefWidth + noteSpacing / 2;
+
+    // Calculate note X positions and time boundaries for playback visualization
+    const notePositions = [];
+    let cumulativeTime = 0;
+    sequence.forEach((note, i) => {
+        const x = notesStartX + i * noteSpacing;
+        const duration = getAdjustedDuration(note.duration);
+        notePositions.push({
+            x: x,
+            startTime: cumulativeTime,
+            endTime: cumulativeTime + duration,
+            duration: duration
+        });
+        cumulativeTime += duration;
+    });
+    const totalDuration = cumulativeTime;
 
     // Draw staff lines
     ctx.strokeStyle = '#555';
@@ -1073,9 +1128,9 @@ function drawSheetMusic(activeIndex = -1, completedUpTo = -1, noteScores = null)
     // Middle line of staff (for stem direction)
     const staffMiddleY = staffTop + 2 * lineSpacing;
 
-    // Draw notes
+    // Draw notes (with optional X offset for countdown animation)
     sequence.forEach((note, i) => {
-        const x = notesStartX + i * noteSpacing;
+        const x = notesStartX + i * noteSpacing + noteOffsetX;
         const staffPos = getStaffPosition(note.note, note.octave);
         const y = getYForStaffPosition(staffPos, clef, staffTop, lineSpacing);
         const isSharp = note.note.includes('#');
@@ -1089,6 +1144,107 @@ function drawSheetMusic(activeIndex = -1, completedUpTo = -1, noteScores = null)
         // Draw the note
         drawNote(ctx, x, y, isSharp, isActive, isCompleted, staffMiddleY, score, note.noteType || NOTE_TYPES.QUARTER, note.dotted || false);
     });
+
+    // Draw playback visualization if in playback mode or showing final trace
+    const showVisualization = (playbackTime >= 0 && sequenceState.isPlaying) || showFinalTrace;
+    if (showVisualization) {
+        // Calculate playhead X position (only used during active playback)
+        let playheadX = notesStartX;
+        if (playbackTime >= 0) {
+            for (let i = 0; i < notePositions.length; i++) {
+                const pos = notePositions[i];
+                if (playbackTime >= pos.startTime && playbackTime < pos.endTime) {
+                    // Interpolate within this note
+                    const progress = (playbackTime - pos.startTime) / pos.duration;
+                    const nextX = (i < notePositions.length - 1) ? notePositions[i + 1].x : pos.x + noteSpacing;
+                    playheadX = pos.x + progress * (nextX - pos.x);
+                    break;
+                } else if (playbackTime >= pos.endTime) {
+                    playheadX = (i < notePositions.length - 1) ? notePositions[i + 1].x : pos.x + noteSpacing / 2;
+                }
+            }
+        }
+
+        // Draw pitch trace
+        if (sequenceState.globalPitchTrace.length > 1) {
+            ctx.lineWidth = 2.5;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+
+            // Draw trace segments
+            for (let i = 1; i < sequenceState.globalPitchTrace.length; i++) {
+                const prev = sequenceState.globalPitchTrace[i - 1];
+                const curr = sequenceState.globalPitchTrace[i];
+
+                // Calculate X positions for both points
+                let prevX = notesStartX, currX = notesStartX;
+
+                for (let j = 0; j < notePositions.length; j++) {
+                    const pos = notePositions[j];
+                    // Previous point
+                    if (prev.time >= pos.startTime && prev.time < pos.endTime) {
+                        const progress = (prev.time - pos.startTime) / pos.duration;
+                        const nextX = (j < notePositions.length - 1) ? notePositions[j + 1].x : pos.x + noteSpacing;
+                        prevX = pos.x + progress * (nextX - pos.x);
+                    }
+                    // Current point
+                    if (curr.time >= pos.startTime && curr.time < pos.endTime) {
+                        const progress = (curr.time - pos.startTime) / pos.duration;
+                        const nextX = (j < notePositions.length - 1) ? notePositions[j + 1].x : pos.x + noteSpacing;
+                        currX = pos.x + progress * (nextX - pos.x);
+                    }
+                }
+
+                // Calculate Y positions based on detected frequency
+                const prevY = frequencyToStaffY(prev.frequency, clef, staffTop, lineSpacing);
+                const currY = frequencyToStaffY(curr.frequency, clef, staffTop, lineSpacing);
+
+                // Color based on cents deviation (use current point's accuracy)
+                const absCents = Math.abs(curr.cents);
+                let traceColor;
+                if (absCents <= 15) {
+                    traceColor = '#6bcb77'; // Green - very accurate
+                } else if (absCents <= 30) {
+                    traceColor = '#a8e6a3'; // Light green - good
+                } else if (absCents <= 50) {
+                    traceColor = '#ffd93d'; // Yellow - okay
+                } else {
+                    traceColor = '#ff6b6b'; // Red - off
+                }
+
+                ctx.strokeStyle = traceColor;
+                ctx.beginPath();
+                ctx.moveTo(prevX, prevY);
+                ctx.lineTo(currX, currY);
+                ctx.stroke();
+            }
+        }
+
+        // Draw playhead line (only during active playback, not final trace)
+        if (sequenceState.isPlaying && playbackTime >= 0) {
+            ctx.strokeStyle = 'rgba(78, 205, 196, 0.8)';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath();
+            ctx.moveTo(playheadX, 10);
+            ctx.lineTo(playheadX, height - 10);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Show "GO!" for the first half beat of playback
+            const goDisplayDuration = sequenceState.countdownBeatInterval * 0.5;
+            if (playbackTime < goDisplayDuration) {
+                const textY = 25;
+                ctx.fillStyle = 'rgba(30, 30, 40, 1)';
+                ctx.fillRect(playheadX - 30, textY - 22, 60, 44);
+                ctx.fillStyle = '#6bcb77';
+                ctx.font = 'bold 36px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('GO!', playheadX, textY);
+            }
+        }
+    }
 }
 
 // Preview sequence
@@ -1158,7 +1314,8 @@ async function startSequence() {
         goBtn.textContent = 'Stop';
         goBtn.classList.add('recording');
         sequenceResults.style.display = 'none';
-        sequenceCanvasContainer.classList.add('active');
+        // Note: visualization now integrated into sheet music, not using separate canvas
+        // sequenceCanvasContainer.classList.add('active');
 
         // Start countdown
         sequenceState.isCountingDown = true;
@@ -1194,15 +1351,15 @@ function getClickBuffer(ctx) {
     return clickBuffer;
 }
 
-// Create a single buffer containing all 4 countdown clicks with silence between
+// Create a single buffer containing 3 countdown clicks with silence between
 function createCountdownBuffer(ctx, beatIntervalSec, leadInSec = 0) {
     const sampleRate = ctx.sampleRate;
     const clickDuration = 0.02; // 20ms per click
     const clickSamples = Math.floor(sampleRate * clickDuration);
     const leadInSamples = Math.floor(sampleRate * leadInSec);
 
-    // Total buffer length: lead-in + 4 beats (last click at beat 3, ends at ~beat 3 + click duration)
-    const totalDuration = leadInSec + (3 * beatIntervalSec) + clickDuration;
+    // Total buffer length: lead-in + 3 beats (last click at beat 2, ends at ~beat 2 + click duration)
+    const totalDuration = leadInSec + (2 * beatIntervalSec) + clickDuration;
     const totalSamples = Math.floor(sampleRate * totalDuration);
 
     const buffer = ctx.createBuffer(1, totalSamples, sampleRate);
@@ -1211,8 +1368,8 @@ function createCountdownBuffer(ctx, beatIntervalSec, leadInSec = 0) {
     // Fill with silence first
     data.fill(0);
 
-    // Add 4 clicks at the appropriate positions (after lead-in)
-    for (let beat = 0; beat < 4; beat++) {
+    // Add 3 clicks at the appropriate positions (after lead-in)
+    for (let beat = 0; beat < 3; beat++) {
         const startSample = leadInSamples + Math.floor(beat * beatIntervalSec * sampleRate);
 
         // Generate noise for this click with decay envelope
@@ -1244,6 +1401,7 @@ function runCountdown() {
     const firstNoteDuration = sequenceState.currentSequence[0].duration;
     const beatIntervalMs = getAdjustedDuration(firstNoteDuration);
     const beatIntervalSec = beatIntervalMs / 1000;
+    sequenceState.countdownBeatInterval = beatIntervalMs; // Store for use during playback
 
     // Add lead-in silence to let mobile audio fully initialize
     const leadInSec = 1.5;
@@ -1278,7 +1436,7 @@ function runCountdown() {
 
     // Show preparing state during lead-in
     sequenceStatus.textContent = 'Preparing...';
-    drawCountdownVisualization(-1); // -1 = preparing state
+    drawCountdownVisualization(-1, 0); // -1 = preparing state, 0 = no progress yet
 
     // Use requestAnimationFrame for smooth visual updates
     function updateVisuals() {
@@ -1294,8 +1452,10 @@ function runCountdown() {
 
         const elapsed = now - countdownStartTime;
         const currentBeat = Math.floor(elapsed / beatIntervalMs);
+        const totalCountdownTime = beatIntervalMs * 3; // 3 beats total (3-2-1, then GO at first note)
+        const progress = Math.min(elapsed / totalCountdownTime, 1); // 0 to 1
 
-        // Only update display when beat changes
+        // Update beat display and trigger pulse only when beat changes
         if (currentBeat !== lastDisplayedBeat) {
             lastDisplayedBeat = currentBeat;
 
@@ -1304,19 +1464,22 @@ function runCountdown() {
 
             if (currentBeat < 3) {
                 const displayNumber = 3 - currentBeat;
-                drawCountdownVisualization(displayNumber);
                 sequenceStatus.textContent = `Get ready... ${displayNumber}`;
-            } else if (currentBeat === 3) {
-                drawCountdownVisualization(0);
-                sequenceStatus.textContent = 'Sing!';
             }
         }
 
-        // Check if countdown is complete (after 4 beats)
-        if (elapsed >= beatIntervalMs * 4) {
+        // Draw countdown visualization every frame for smooth playhead animation
+        const displayNumber = currentBeat < 3 ? 3 - currentBeat : 0;
+        drawCountdownVisualization(displayNumber, progress);
+
+        // Check if countdown is complete (after 3 beats) - GO appears right at first note
+        if (elapsed >= beatIntervalMs * 3) {
+            sequenceStatus.textContent = 'Sing!';
             sequenceState.isCountingDown = false;
             sequenceState.isPlaying = true;
             sequenceState.noteStartTime = performance.now();
+            sequenceState.sequenceStartTime = performance.now();
+            sequenceState.globalPitchTrace = [];
             lastSequenceSampleTime = 0;
             animationId = requestAnimationFrame(analyzeSequence);
             return;
@@ -1328,56 +1491,70 @@ function runCountdown() {
     requestAnimationFrame(updateVisuals);
 }
 
-// Draw countdown screen
-function drawCountdownVisualization(count) {
-    const width = sequenceCanvas.width;
-    const height = sequenceCanvas.height;
+// Draw countdown screen with notes scrolling towards fixed playhead
+function drawCountdownVisualization(count, progress = 0) {
+    const ctx = sheetMusicCtx;
+    const width = sheetMusicCanvas.width;
+    const height = sheetMusicCanvas.height;
 
-    // Clear
-    sequenceCtx.fillStyle = 'rgba(30, 30, 40, 1)';
-    sequenceCtx.fillRect(0, 0, width, height);
+    const sequence = sequenceState.currentSequence;
+    if (sequence.length === 0) return;
+
+    // Calculate note spacing (same as in drawSheetMusic)
+    const clefWidth = 40;
+    const leftMargin = 15;
+    const rightMargin = 15;
+    const noteAreaWidth = width - leftMargin - clefWidth - rightMargin;
+    const noteSpacing = Math.min(50, noteAreaWidth / sequence.length);
+    const notesStartX = leftMargin + clefWidth + noteSpacing / 2;
+
+    // Notes start offset to the right and scroll left at quarter note speed
+    // Countdown is 3 beats, so offset starts at 3 * noteSpacing and decreases to 0
+    const maxOffset = 3 * noteSpacing;
+    const noteOffsetX = maxOffset * (1 - progress);
+
+    // Draw sheet music with first note highlighted and offset applied
+    drawSheetMusic(0, 0, null, -1, false, noteOffsetX);
+
+    // Playhead stays at fixed position (where first note will be when countdown ends)
+    const playheadX = notesStartX;
+
+    // Draw playhead line
+    ctx.strokeStyle = 'rgba(78, 205, 196, 0.8)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(playheadX, 10);
+    ctx.lineTo(playheadX, height - 10);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Draw countdown number or text above the staff at playhead position
+    const textY = 25; // Above the staff (staff starts at y=55)
 
     if (count === -1) {
-        // Preparing state (during lead-in)
-        sequenceCtx.fillStyle = '#888';
-        sequenceCtx.font = 'bold 40px sans-serif';
-        sequenceCtx.textAlign = 'center';
-        sequenceCtx.textBaseline = 'middle';
-        sequenceCtx.fillText('Get ready...', width / 2, height / 2 - 10);
+        // Preparing state (during lead-in) - opaque background
+        ctx.fillStyle = 'rgba(30, 30, 40, 1)';
+        ctx.fillRect(playheadX - 55, textY - 12, 110, 24);
 
-        const firstNote = sequenceState.currentSequence[0];
-        sequenceCtx.fillStyle = '#666';
-        sequenceCtx.font = '14px sans-serif';
-        sequenceCtx.fillText(`First note: ${firstNote.name}`, width / 2, height / 2 + 30);
+        ctx.fillStyle = '#888';
+        ctx.font = 'bold 16px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('Get ready...', playheadX, textY);
         return;
     }
 
-    // Draw countdown number or "GO!"
-    sequenceCtx.fillStyle = count === 0 ? '#6bcb77' : '#4ecdc4';
-    sequenceCtx.font = 'bold 80px sans-serif';
-    sequenceCtx.textAlign = 'center';
-    sequenceCtx.textBaseline = 'middle';
+    // Draw countdown number or "GO!" above the staff with opaque background
     const displayText = count === 0 ? 'GO!' : count.toString();
-    sequenceCtx.fillText(displayText, width / 2, height / 2 - 20);
+    ctx.fillStyle = 'rgba(30, 30, 40, 1)';
+    ctx.fillRect(playheadX - 30, textY - 22, 60, 44);
 
-    if (count > 0) {
-        // Draw "Get Ready" text
-        sequenceCtx.fillStyle = '#888';
-        sequenceCtx.font = '18px sans-serif';
-        sequenceCtx.fillText('Get Ready...', width / 2, height / 2 + 40);
-
-        // Draw first note preview
-        const firstNote = sequenceState.currentSequence[0];
-        sequenceCtx.fillStyle = '#666';
-        sequenceCtx.font = '14px sans-serif';
-        sequenceCtx.fillText(`First note: ${firstNote.name}`, width / 2, height / 2 + 70);
-    } else {
-        // Draw "Start singing" text for GO
-        const firstNote = sequenceState.currentSequence[0];
-        sequenceCtx.fillStyle = '#6bcb77';
-        sequenceCtx.font = '18px sans-serif';
-        sequenceCtx.fillText(`Sing: ${firstNote.name}`, width / 2, height / 2 + 50);
-    }
+    ctx.fillStyle = count === 0 ? '#6bcb77' : '#4ecdc4';
+    ctx.font = 'bold 36px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(displayText, playheadX, textY);
 }
 
 // Stop sequence
@@ -1432,6 +1609,14 @@ function analyzeSequence(timestamp) {
             sequenceState.pitchSamplesForNote.push(cents);
             sequenceState.pitchHistory.push(cents);
 
+            // Add to global pitch trace for integrated visualization
+            sequenceState.globalPitchTrace.push({
+                time: timestamp - sequenceState.sequenceStartTime,
+                frequency: pitch,
+                noteIndex: sequenceState.currentNoteIndex,
+                cents: cents
+            });
+
             if (Math.abs(cents) <= 50) {
                 sequenceState.timeOnPitch += sequenceSampleInterval;
             }
@@ -1447,7 +1632,10 @@ function analyzeSequence(timestamp) {
         if (!sequenceState.isPlaying) return;
     }
 
-    drawSequenceVisualization(elapsed, adjustedDuration);
+    // Draw integrated visualization on sheet music
+    const playbackTime = timestamp - sequenceState.sequenceStartTime;
+    drawSheetMusic(sequenceState.currentNoteIndex, sequenceState.currentNoteIndex, sequenceState.noteScores, playbackTime);
+
     animationId = requestAnimationFrame(analyzeSequence);
 }
 
@@ -1537,11 +1725,11 @@ function finishSequence() {
     resultsGrade.className = `results-grade grade-${grade.toLowerCase()}`;
     resultsPercent.textContent = `${percentage}%`;
 
-    resultsBreakdown.innerHTML = sequenceState.noteScores.map(ns => {
+    resultsBreakdown.innerHTML = sequenceState.noteScores.map((ns, i) => {
         const scoreClass = ns.score >= 70 ? 'score-high' : ns.score >= 40 ? 'score-mid' : 'score-low';
         return `
             <div class="breakdown-item">
-                <span class="breakdown-note">${ns.note}</span>
+                <canvas class="breakdown-mini-staff" data-note-index="${i}" width="105" height="45"></canvas>
                 <div class="breakdown-score">
                     <div class="breakdown-bar">
                         <div class="breakdown-fill ${scoreClass}" style="width: ${ns.score}%"></div>
@@ -1552,11 +1740,19 @@ function finishSequence() {
         `;
     }).join('');
 
+    // Draw mini-staffs for each note
+    const miniStaffCanvases = resultsBreakdown.querySelectorAll('.breakdown-mini-staff');
+    miniStaffCanvases.forEach(canvas => {
+        const noteIndex = parseInt(canvas.dataset.noteIndex);
+        const score = sequenceState.noteScores[noteIndex].score;
+        drawBreakdownMiniStaff(canvas, sequenceState.currentSequence, noteIndex, score);
+    });
+
     sequenceResults.style.display = '';
     sequenceCanvasContainer.classList.remove('active');
 
-    // Draw sheet music with performance-based coloring
-    drawSheetMusic(-1, -1, sequenceState.noteScores);
+    // Draw sheet music with performance-based coloring and final pitch trace
+    drawSheetMusic(-1, -1, sequenceState.noteScores, -1, true);
 }
 
 // Draw sequence visualization
@@ -2103,6 +2299,238 @@ function drawMiniLedgerLines(ctx, x, y, staffTop, lineSpacing) {
     }
 
     ctx.restore();
+}
+
+// Draw a mini-staff for results breakdown with context notes (prev/next shown faded)
+function drawBreakdownMiniStaff(canvas, sequence, noteIndex, noteScore) {
+    const ctx = canvas.getContext('2d');
+    const width = canvas.width;
+    const height = canvas.height;
+
+    // Clear
+    ctx.fillStyle = 'rgba(30, 30, 40, 1)';
+    ctx.fillRect(0, 0, width, height);
+
+    const currentNote = sequence[noteIndex];
+    const prevNote = noteIndex > 0 ? sequence[noteIndex - 1] : null;
+    const nextNote = noteIndex < sequence.length - 1 ? sequence[noteIndex + 1] : null;
+
+    // Layout
+    const staffTop = 12;
+    const lineSpacing = 6;
+    const clefWidth = 18;
+    const leftMargin = 3;
+    const noteSpacing = 20;
+
+    // Determine clef based on current note
+    const staffPos = getStaffPosition(currentNote.note, currentNote.octave);
+    const clef = staffPos >= 28 ? 'treble' : 'bass';
+    const staffMiddleY = staffTop + 2 * lineSpacing;
+
+    // Draw staff lines
+    ctx.strokeStyle = '#555';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 5; i++) {
+        const y = staffTop + i * lineSpacing;
+        ctx.beginPath();
+        ctx.moveTo(leftMargin, y);
+        ctx.lineTo(width - 3, y);
+        ctx.stroke();
+    }
+
+    // Draw clef
+    if (clef === 'treble') {
+        drawTrebleClefMini(ctx, leftMargin, staffTop, lineSpacing);
+    } else {
+        drawBassClefMini(ctx, leftMargin, staffTop, lineSpacing);
+    }
+
+    // Calculate note positions - spread evenly across available space
+    // Always use 3 positions for consistent layout (prev, center, next)
+    const notesAreaStart = leftMargin + clefWidth + 10;
+    const notesAreaEnd = width - 8;
+    const notesAreaWidth = notesAreaEnd - notesAreaStart;
+    const prevX = notesAreaStart;
+    const centerX = notesAreaStart + notesAreaWidth * 0.35;
+    const nextX = notesAreaStart + notesAreaWidth * 0.75;
+
+    // Helper to draw a mini note with stem and dot
+    function drawMiniNote(note, x, alpha, scoreValue) {
+        const pos = getStaffPosition(note.note, note.octave);
+        const y = getYForStaffPosition(pos, clef, staffTop, lineSpacing);
+        const isSharp = note.note.includes('#');
+        const noteType = note.noteType || NOTE_TYPES.QUARTER;
+        const dotted = note.dotted || false;
+
+        ctx.save();
+        ctx.globalAlpha = alpha;
+
+        // Draw ledger lines
+        ctx.strokeStyle = '#666';
+        ctx.lineWidth = 1;
+        const bottomLine = staffTop + 4 * lineSpacing;
+        const topLine = staffTop;
+        if (y > bottomLine + lineSpacing / 2) {
+            for (let ly = bottomLine + lineSpacing; ly <= y + lineSpacing / 2; ly += lineSpacing) {
+                ctx.beginPath();
+                ctx.moveTo(x - 5, ly);
+                ctx.lineTo(x + 5, ly);
+                ctx.stroke();
+            }
+        }
+        if (y < topLine - lineSpacing / 2) {
+            for (let ly = topLine - lineSpacing; ly >= y - lineSpacing / 2; ly -= lineSpacing) {
+                ctx.beginPath();
+                ctx.moveTo(x - 5, ly);
+                ctx.lineTo(x + 5, ly);
+                ctx.stroke();
+            }
+        }
+
+        // Determine color
+        let noteColor;
+        if (scoreValue !== null) {
+            if (scoreValue >= 70) noteColor = '#6bcb77';
+            else if (scoreValue >= 40) noteColor = '#ffd93d';
+            else noteColor = '#ff6b6b';
+        } else {
+            noteColor = '#666';
+        }
+        ctx.fillStyle = noteColor;
+        ctx.strokeStyle = noteColor;
+
+        // Mini note dimensions (scaled down from main)
+        const noteWidth = 4;
+        const noteHeight = 3;
+        const stemHeight = 16;
+        const isHollow = noteType === NOTE_TYPES.WHOLE || noteType === NOTE_TYPES.HALF;
+        const hasStem = noteType !== NOTE_TYPES.WHOLE;
+        const hasFlag = noteType === NOTE_TYPES.EIGHTH;
+        const stemDown = y <= staffMiddleY;
+
+        // Draw note head
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        if (noteType === NOTE_TYPES.WHOLE) {
+            ctx.ellipse(x, y, noteWidth + 1, noteHeight, 0, 0, 2 * Math.PI);
+        } else {
+            ctx.ellipse(x, y, noteWidth, noteHeight, -0.3, 0, 2 * Math.PI);
+        }
+        if (isHollow) {
+            ctx.stroke();
+        } else {
+            ctx.fill();
+        }
+
+        // Draw stem
+        if (hasStem) {
+            ctx.lineWidth = 1;
+            if (stemDown) {
+                ctx.beginPath();
+                ctx.moveTo(x - noteWidth + 1, y);
+                ctx.lineTo(x - noteWidth + 1, y + stemHeight);
+                ctx.stroke();
+                // Flag for eighth notes
+                if (hasFlag) {
+                    ctx.beginPath();
+                    ctx.moveTo(x - noteWidth + 1, y + stemHeight);
+                    ctx.quadraticCurveTo(x + 2, y + stemHeight - 4, x + 4, y + stemHeight - 10);
+                    ctx.stroke();
+                }
+            } else {
+                ctx.beginPath();
+                ctx.moveTo(x + noteWidth - 1, y);
+                ctx.lineTo(x + noteWidth - 1, y - stemHeight);
+                ctx.stroke();
+                if (hasFlag) {
+                    ctx.beginPath();
+                    ctx.moveTo(x + noteWidth - 1, y - stemHeight);
+                    ctx.quadraticCurveTo(x + 6, y - stemHeight + 4, x + 8, y - stemHeight + 10);
+                    ctx.stroke();
+                }
+            }
+        }
+
+        // Draw dot
+        if (dotted) {
+            ctx.beginPath();
+            ctx.arc(x + noteWidth + 3, y, 1.5, 0, 2 * Math.PI);
+            ctx.fill();
+        }
+
+        // Draw accidental
+        if (isSharp) {
+            ctx.font = 'bold 8px serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('\u266F', x - 7, y);
+        }
+
+        ctx.restore();
+    }
+
+    // Draw context notes first (faded, no score coloring)
+    if (prevNote) {
+        drawMiniNote(prevNote, prevX, 0.5, null);
+    }
+    if (nextNote) {
+        drawMiniNote(nextNote, nextX, 0.5, null);
+    }
+
+    // Draw main note (full opacity, colored by score)
+    drawMiniNote(currentNote, centerX, 1.0, noteScore);
+
+    // Draw pitch trace for this note
+    const noteSamples = sequenceState.globalPitchTrace.filter(s => s.noteIndex === noteIndex);
+    if (noteSamples.length > 1) {
+        // Get time bounds for this note
+        const noteStartTime = noteSamples[0].time;
+        const noteEndTime = noteSamples[noteSamples.length - 1].time;
+        const noteDuration = noteEndTime - noteStartTime;
+
+        // X range for the trace - starts after main note, always ends at next note position
+        const traceStartX = centerX + 6;
+        const traceEndX = nextX - 6;
+        const traceWidth = traceEndX - traceStartX;
+
+        ctx.lineWidth = 1.5;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        for (let i = 1; i < noteSamples.length; i++) {
+            const prev = noteSamples[i - 1];
+            const curr = noteSamples[i];
+
+            // Map time to X position
+            const prevProgress = noteDuration > 0 ? (prev.time - noteStartTime) / noteDuration : 0;
+            const currProgress = noteDuration > 0 ? (curr.time - noteStartTime) / noteDuration : 0;
+            const prevTraceX = traceStartX + prevProgress * traceWidth;
+            const currTraceX = traceStartX + currProgress * traceWidth;
+
+            // Map frequency to Y position
+            const prevY = frequencyToStaffY(prev.frequency, clef, staffTop, lineSpacing);
+            const currY = frequencyToStaffY(curr.frequency, clef, staffTop, lineSpacing);
+
+            // Color based on cents deviation
+            const absCents = Math.abs(curr.cents);
+            let traceColor;
+            if (absCents <= 15) {
+                traceColor = '#6bcb77';
+            } else if (absCents <= 30) {
+                traceColor = '#a8e6a3';
+            } else if (absCents <= 50) {
+                traceColor = '#ffd93d';
+            } else {
+                traceColor = '#ff6b6b';
+            }
+
+            ctx.strokeStyle = traceColor;
+            ctx.beginPath();
+            ctx.moveTo(prevTraceX, prevY);
+            ctx.lineTo(currTraceX, currY);
+            ctx.stroke();
+        }
+    }
 }
 
 // Draw a selectable note on grand staff (hollow whole note with hover state)

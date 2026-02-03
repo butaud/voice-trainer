@@ -158,10 +158,16 @@ function playTone(frequency, duration = 1.5, callback = null) {
         oscillator.type = 'sine';
         oscillator.frequency.setValueAtTime(frequency, ctx.currentTime);
 
+        // Calculate volume with bass boost for lower frequencies
+        // Lower notes need more gain to sound equally loud (equal-loudness compensation)
+        const baseVolume = 0.9;
+        const bassBoost = frequency < 250 ? (250 - frequency) / 250 * 0.5 : 0;
+        const volume = Math.min(1.5, baseVolume + bassBoost);
+
         const gainNode = ctx.createGain();
         gainNode.gain.setValueAtTime(0, ctx.currentTime);
-        gainNode.gain.linearRampToValueAtTime(0.3, ctx.currentTime + 0.05);
-        gainNode.gain.linearRampToValueAtTime(0.3, ctx.currentTime + duration - 0.1);
+        gainNode.gain.linearRampToValueAtTime(volume, ctx.currentTime + 0.05);
+        gainNode.gain.linearRampToValueAtTime(volume, ctx.currentTime + duration - 0.1);
         gainNode.gain.linearRampToValueAtTime(0, ctx.currentTime + duration);
 
         oscillator.connect(gainNode);
@@ -421,6 +427,8 @@ function analyze(timestamp) {
 // Start live analysis
 async function start() {
     try {
+        // Ensure audio context is warmed up and resumed
+        await warmUpAudio();
         const ctx = getAudioContext();
 
         micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -507,7 +515,8 @@ const sequenceSection = document.querySelector('.sequence-section');
 const sequenceSelect = document.getElementById('sequence-select');
 const startNoteSelect = document.getElementById('start-note-select');
 const startOctaveSelect = document.getElementById('start-octave-select');
-const previewNotesEl = document.getElementById('preview-notes');
+const sheetMusicCanvas = document.getElementById('sheet-music-canvas');
+const sheetMusicCtx = sheetMusicCanvas.getContext('2d');
 const previewBtn = document.getElementById('preview-btn');
 const goBtn = document.getElementById('go-btn');
 const sequenceCanvas = document.getElementById('sequence-canvas');
@@ -587,16 +596,275 @@ function loadSequence(id) {
         };
     });
 
-    renderPreviewNotes();
+    drawSheetMusic();
     sequenceResults.style.display = 'none';
     sequenceCanvasContainer.classList.remove('active');
 }
 
-// Render preview notes
-function renderPreviewNotes() {
-    previewNotesEl.innerHTML = sequenceState.currentSequence
-        .map((n, i) => `<span class="preview-note" data-index="${i}">${n.name}</span>`)
-        .join('');
+// Sheet music drawing
+
+// Diatonic note positions (C=0, D=1, E=2, F=3, G=4, A=5, B=6)
+const diatonicPosition = { 'C': 0, 'D': 1, 'E': 2, 'F': 3, 'G': 4, 'A': 5, 'B': 6 };
+
+// Get the diatonic position of a note (for vertical placement on staff)
+function getStaffPosition(note, octave) {
+    // Get base note without sharp
+    const baseNote = note.replace('#', '');
+    // Position relative to C0: octave * 7 + diatonic position
+    return octave * 7 + diatonicPosition[baseNote];
+}
+
+// Determine best clef for a sequence
+function getBestClef(sequence) {
+    if (sequence.length === 0) return 'treble';
+
+    // Calculate average staff position
+    const avgPosition = sequence.reduce((sum, n) => sum + getStaffPosition(n.note, n.octave), 0) / sequence.length;
+
+    // Middle C (C4) is at position 28
+    // Use treble if average is >= C4, bass otherwise
+    return avgPosition >= 28 ? 'treble' : 'bass';
+}
+
+// Get Y position on canvas for a staff position
+function getYForStaffPosition(staffPos, clef, staffTop, lineSpacing) {
+    // Reference positions for each clef (the note on the bottom line)
+    // Treble: bottom line is E4 (position 30)
+    // Bass: bottom line is G2 (position 18)
+    const refPosition = clef === 'treble' ? 30 : 18;
+
+    // Each staff position is half a line spacing
+    // Bottom line is at staffTop + 4 * lineSpacing
+    const bottomLineY = staffTop + 4 * lineSpacing;
+    const positionDiff = staffPos - refPosition;
+
+    return bottomLineY - (positionDiff * lineSpacing / 2);
+}
+
+// Draw a treble clef
+function drawTrebleClef(ctx, x, staffTop, lineSpacing) {
+    ctx.save();
+    ctx.strokeStyle = '#999';
+    ctx.fillStyle = '#999';
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    // G line is the second line from bottom (staffTop + 3 * lineSpacing)
+    const gLineY = staffTop + 3 * lineSpacing;
+    const cx = x + 18;
+
+    // Draw using a series of arcs and lines to form treble clef shape
+    // Vertical line through the clef
+    ctx.beginPath();
+    ctx.moveTo(cx, staffTop - 5);
+    ctx.lineTo(cx, staffTop + 4.5 * lineSpacing);
+    ctx.stroke();
+
+    // Main curved part that wraps around G line
+    ctx.beginPath();
+    ctx.arc(cx - 1, gLineY, lineSpacing * 0.9, 0, Math.PI * 1.9);
+    ctx.stroke();
+
+    // Upper spiral
+    ctx.beginPath();
+    ctx.arc(cx + 2, staffTop + 1.2 * lineSpacing, lineSpacing * 1.1, Math.PI * 0.5, Math.PI * 2);
+    ctx.stroke();
+
+    // Bottom curl
+    ctx.beginPath();
+    ctx.arc(cx - 5, staffTop + 4.8 * lineSpacing, lineSpacing * 0.5, Math.PI * 1.5, Math.PI * 0.8);
+    ctx.stroke();
+
+    ctx.restore();
+}
+
+// Draw a bass clef using bezier curves
+function drawBassClef(ctx, x, staffTop, lineSpacing) {
+    ctx.save();
+    ctx.strokeStyle = '#999';
+    ctx.fillStyle = '#999';
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+
+    const scale = lineSpacing / 10;
+    const cx = x + 12;
+    const cy = staffTop + lineSpacing; // Center on F line
+
+    // Main curve
+    ctx.beginPath();
+    ctx.arc(cx, cy + 2*scale, 8*scale, -0.8 * Math.PI, 0.5 * Math.PI);
+    ctx.stroke();
+
+    // Head dot
+    ctx.beginPath();
+    ctx.arc(cx - 2*scale, cy - 2*scale, 3.5*scale, 0, 2 * Math.PI);
+    ctx.fill();
+
+    // Two dots
+    ctx.beginPath();
+    ctx.arc(cx + 14*scale, cy - 3*scale, 2*scale, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(cx + 14*scale, cy + 7*scale, 2*scale, 0, 2 * Math.PI);
+    ctx.fill();
+
+    ctx.restore();
+}
+
+// Draw a note with stem
+function drawNote(ctx, x, y, isSharp, isActive, isCompleted, staffMiddleY, score = null) {
+    ctx.save();
+
+    // Determine colors
+    let noteColor;
+    if (score !== null) {
+        // Color based on performance score
+        if (score >= 70) {
+            noteColor = '#6bcb77'; // Green - good
+        } else if (score >= 40) {
+            noteColor = '#ffd93d'; // Yellow - okay
+        } else {
+            noteColor = '#ff6b6b'; // Red - poor
+        }
+    } else if (isActive) {
+        noteColor = '#4ecdc4'; // Cyan - current
+    } else if (isCompleted) {
+        noteColor = '#6bcb77'; // Green - completed
+    } else {
+        noteColor = '#bbb'; // Gray - upcoming
+    }
+    ctx.fillStyle = noteColor;
+    ctx.strokeStyle = noteColor;
+
+    // Note head dimensions
+    const noteWidth = 7;
+    const noteHeight = 5;
+
+    // Draw filled note head (oval, slightly tilted)
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.ellipse(x, y, noteWidth, noteHeight, -0.3, 0, 2 * Math.PI);
+    ctx.fill();
+
+    // Draw stem
+    const stemHeight = 30;
+    const stemWidth = 1.5;
+
+    // Stem goes down (left side) if note is on or above middle line, up (right side) if below
+    if (y <= staffMiddleY) {
+        // Stem down (on left side of note)
+        ctx.fillRect(x - noteWidth + 1, y, stemWidth, stemHeight);
+    } else {
+        // Stem up (on right side of note)
+        ctx.fillRect(x + noteWidth - stemWidth - 1, y - stemHeight, stemWidth, stemHeight);
+    }
+
+    // Draw sharp if needed
+    if (isSharp) {
+        ctx.font = 'bold 14px serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('♯', x - 16, y);
+    }
+
+    ctx.restore();
+}
+
+// Draw ledger lines for notes outside the staff
+function drawLedgerLines(ctx, x, y, staffTop, lineSpacing, clef) {
+    ctx.save();
+    ctx.strokeStyle = '#666';
+    ctx.lineWidth = 1;
+
+    const bottomLine = staffTop + 4 * lineSpacing;
+    const topLine = staffTop;
+
+    // Draw ledger lines below staff
+    if (y > bottomLine + lineSpacing / 2) {
+        for (let ly = bottomLine + lineSpacing; ly <= y + lineSpacing / 2; ly += lineSpacing) {
+            ctx.beginPath();
+            ctx.moveTo(x - 12, ly);
+            ctx.lineTo(x + 12, ly);
+            ctx.stroke();
+        }
+    }
+
+    // Draw ledger lines above staff
+    if (y < topLine - lineSpacing / 2) {
+        for (let ly = topLine - lineSpacing; ly >= y - lineSpacing / 2; ly -= lineSpacing) {
+            ctx.beginPath();
+            ctx.moveTo(x - 12, ly);
+            ctx.lineTo(x + 12, ly);
+            ctx.stroke();
+        }
+    }
+
+    ctx.restore();
+}
+
+// Main function to draw sheet music
+function drawSheetMusic(activeIndex = -1, completedUpTo = -1, noteScores = null) {
+    const canvas = sheetMusicCanvas;
+    const ctx = sheetMusicCtx;
+    const width = canvas.width;
+    const height = canvas.height;
+
+    // Clear
+    ctx.fillStyle = 'rgba(30, 30, 40, 1)';
+    ctx.fillRect(0, 0, width, height);
+
+    const sequence = sequenceState.currentSequence;
+    if (sequence.length === 0) return;
+
+    // Layout
+    const staffTop = 35;
+    const lineSpacing = 10;
+    const clef = getBestClef(sequence);
+    const clefWidth = 40;
+    const leftMargin = 15;
+    const rightMargin = 15;
+    const noteAreaWidth = width - leftMargin - clefWidth - rightMargin;
+    const noteSpacing = Math.min(50, noteAreaWidth / sequence.length);
+    const notesStartX = leftMargin + clefWidth + noteSpacing / 2;
+
+    // Draw staff lines
+    ctx.strokeStyle = '#555';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 5; i++) {
+        const y = staffTop + i * lineSpacing;
+        ctx.beginPath();
+        ctx.moveTo(leftMargin, y);
+        ctx.lineTo(width - rightMargin, y);
+        ctx.stroke();
+    }
+
+    // Draw clef
+    if (clef === 'treble') {
+        drawTrebleClef(ctx, leftMargin, staffTop, lineSpacing);
+    } else {
+        drawBassClef(ctx, leftMargin, staffTop, lineSpacing);
+    }
+
+    // Middle line of staff (for stem direction)
+    const staffMiddleY = staffTop + 2 * lineSpacing;
+
+    // Draw notes
+    sequence.forEach((note, i) => {
+        const x = notesStartX + i * noteSpacing;
+        const staffPos = getStaffPosition(note.note, note.octave);
+        const y = getYForStaffPosition(staffPos, clef, staffTop, lineSpacing);
+        const isSharp = note.note.includes('#');
+        const isActive = i === activeIndex;
+        const isCompleted = i < completedUpTo;
+        const score = noteScores && noteScores[i] ? noteScores[i].score : null;
+
+        // Draw ledger lines if needed
+        drawLedgerLines(ctx, x, y, staffTop, lineSpacing, clef);
+
+        // Draw the note
+        drawNote(ctx, x, y, isSharp, isActive, isCompleted, staffMiddleY, score);
+    });
 }
 
 // Preview sequence
@@ -615,13 +883,12 @@ function previewSequence() {
             sequenceState.isPreviewing = false;
             previewBtn.disabled = false;
             goBtn.disabled = false;
-            document.querySelectorAll('.preview-note').forEach(el => el.classList.remove('active'));
+            drawSheetMusic(-1, -1); // Reset highlighting
             return;
         }
 
-        document.querySelectorAll('.preview-note').forEach(el => el.classList.remove('active'));
-        const noteEl = document.querySelector(`.preview-note[data-index="${index}"]`);
-        if (noteEl) noteEl.classList.add('active');
+        // Highlight current note on sheet music
+        drawSheetMusic(index, index);
 
         const note = notes[index];
         playTone(note.frequency, 0.8, () => {
@@ -638,6 +905,8 @@ async function startSequence() {
     if (sequenceState.isPlaying || sequenceState.isCountingDown) return;
 
     try {
+        // Ensure audio context is warmed up and resumed
+        await warmUpAudio();
         const ctx = getAudioContext();
 
         micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -742,16 +1011,9 @@ function stopSequence() {
     sequenceStatus.textContent = '';
 }
 
-// Update preview notes to show current/completed state
+// Update sheet music to show current/completed state
 function updatePreviewNotesState() {
-    document.querySelectorAll('.preview-note').forEach((el, i) => {
-        el.classList.remove('active', 'completed');
-        if (i < sequenceState.currentNoteIndex) {
-            el.classList.add('completed');
-        } else if (i === sequenceState.currentNoteIndex) {
-            el.classList.add('active');
-        }
-    });
+    drawSheetMusic(sequenceState.currentNoteIndex, sequenceState.currentNoteIndex);
 }
 
 // Analyze sequence (main loop during challenge)
@@ -895,7 +1157,9 @@ function finishSequence() {
 
     sequenceResults.style.display = '';
     sequenceCanvasContainer.classList.remove('active');
-    updatePreviewNotesState();
+
+    // Draw sheet music with performance-based coloring
+    drawSheetMusic(-1, -1, sequenceState.noteScores);
 }
 
 // Draw sequence visualization
@@ -1113,6 +1377,6 @@ goBtn.addEventListener('click', () => {
 
 retryBtn.addEventListener('click', () => {
     sequenceResults.style.display = 'none';
-    renderPreviewNotes();
+    drawSheetMusic();
     startSequence();
 });

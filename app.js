@@ -18,44 +18,44 @@ const NOTE_TYPES = {
     EIGHTH: 'eighth'
 };
 
-// Predefined sequences
+// Predefined sequences (durations in ms at 100% tempo)
 const sequences = {
     'simple-scale': {
         name: 'Simple Scale (C-E)',
         notes: [
-            { note: 'C', octave: 3, duration: 1800, noteType: NOTE_TYPES.QUARTER },
-            { note: 'D', octave: 3, duration: 1800, noteType: NOTE_TYPES.QUARTER },
-            { note: 'E', octave: 3, duration: 1800, noteType: NOTE_TYPES.QUARTER }
+            { note: 'C', octave: 3, duration: 1050, noteType: NOTE_TYPES.QUARTER },
+            { note: 'D', octave: 3, duration: 1050, noteType: NOTE_TYPES.QUARTER },
+            { note: 'E', octave: 3, duration: 1050, noteType: NOTE_TYPES.QUARTER }
         ]
     },
     'octave-jump': {
         name: 'Octave Jump',
         notes: [
-            { note: 'C', octave: 3, duration: 1500, noteType: NOTE_TYPES.QUARTER },
-            { note: 'C', octave: 4, duration: 1500, noteType: NOTE_TYPES.QUARTER },
-            { note: 'C', octave: 3, duration: 1500, noteType: NOTE_TYPES.QUARTER }
+            { note: 'C', octave: 3, duration: 860, noteType: NOTE_TYPES.QUARTER },
+            { note: 'C', octave: 4, duration: 860, noteType: NOTE_TYPES.QUARTER },
+            { note: 'C', octave: 3, duration: 860, noteType: NOTE_TYPES.QUARTER }
         ]
     },
     'major-arpeggio': {
         name: 'Major Arpeggio',
         notes: [
-            { note: 'C', octave: 3, duration: 1200, noteType: NOTE_TYPES.QUARTER },
-            { note: 'E', octave: 3, duration: 1200, noteType: NOTE_TYPES.QUARTER },
-            { note: 'G', octave: 3, duration: 1200, noteType: NOTE_TYPES.QUARTER },
-            { note: 'C', octave: 4, duration: 1200, noteType: NOTE_TYPES.QUARTER }
+            { note: 'C', octave: 3, duration: 690, noteType: NOTE_TYPES.QUARTER },
+            { note: 'E', octave: 3, duration: 690, noteType: NOTE_TYPES.QUARTER },
+            { note: 'G', octave: 3, duration: 690, noteType: NOTE_TYPES.QUARTER },
+            { note: 'C', octave: 4, duration: 690, noteType: NOTE_TYPES.QUARTER }
         ]
     },
     'full-scale': {
         name: 'Full Scale Up',
         notes: [
-            { note: 'C', octave: 3, duration: 1000, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'D', octave: 3, duration: 1000, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'E', octave: 3, duration: 1000, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'F', octave: 3, duration: 1000, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'G', octave: 3, duration: 1000, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'A', octave: 3, duration: 1000, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'B', octave: 3, duration: 1000, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'C', octave: 4, duration: 1000, noteType: NOTE_TYPES.EIGHTH }
+            { note: 'C', octave: 3, duration: 575, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'D', octave: 3, duration: 575, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'E', octave: 3, duration: 575, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'F', octave: 3, duration: 575, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'G', octave: 3, duration: 575, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'A', octave: 3, duration: 575, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'B', octave: 3, duration: 575, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'C', octave: 4, duration: 575, noteType: NOTE_TYPES.EIGHTH }
         ]
     },
     'custom': {
@@ -174,7 +174,9 @@ const sequenceState = {
     isPlaying: false,
     isPreviewing: false,
     isCountingDown: false,
-    countdownValue: 0,
+    countdownStartTime: 0,
+    countdownBeatInterval: 1000,
+    countdownLastBeat: -1,
     currentSequence: [],
     currentNoteIndex: 0,
     noteStartTime: 0,
@@ -241,7 +243,7 @@ function warmUpAudio() {
     const resumePromise = ctx.state === 'suspended' ? ctx.resume() : Promise.resolve();
 
     return resumePromise.then(() => {
-        // Play a very short silent tone to prime the audio system
+        // Play a very short silent tone to prime the oscillator path
         const oscillator = ctx.createOscillator();
         const gainNode = ctx.createGain();
         gainNode.gain.setValueAtTime(0, ctx.currentTime); // Silent
@@ -249,6 +251,26 @@ function warmUpAudio() {
         gainNode.connect(ctx.destination);
         oscillator.start(ctx.currentTime);
         oscillator.stop(ctx.currentTime + 0.01);
+
+        // Also prime the noise buffer path (used for click sounds)
+        // Pre-create the click buffer
+        const bufferSize = Math.floor(ctx.sampleRate * 0.02);
+        clickBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+        const data = clickBuffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+            data[i] = Math.random() * 2 - 1;
+        }
+
+        // Play a silent click to prime the buffer source path
+        const noise = ctx.createBufferSource();
+        noise.buffer = clickBuffer;
+        const silentGain = ctx.createGain();
+        silentGain.gain.setValueAtTime(0, ctx.currentTime);
+        noise.connect(silentGain);
+        silentGain.connect(ctx.destination);
+        noise.start(ctx.currentTime);
+        noise.stop(ctx.currentTime + 0.01);
+
         audioWarmedUp = true;
     });
 }
@@ -648,6 +670,15 @@ const musicxmlImport = document.getElementById('musicxml-import');
 const musicxmlFile = document.getElementById('musicxml-file');
 const musicxmlFilename = document.getElementById('musicxml-filename');
 const startingNoteContainer = document.getElementById('starting-note-container');
+const octaveDownBtn = document.getElementById('octave-down-btn');
+const octaveUpBtn = document.getElementById('octave-up-btn');
+const octaveShiftDisplay = document.getElementById('octave-shift-display');
+const tempoSlider = document.getElementById('tempo-slider');
+const tempoDisplay = document.getElementById('tempo-display');
+
+// Sequence configuration state
+let octaveShift = 0;
+let tempoPercent = 100;
 
 // Mode toggle
 function setMode(mode) {
@@ -685,18 +716,23 @@ function semitoneToNote(semitone) {
     return { note: noteNames[noteIndex], octave };
 }
 
-// Load sequence with transposition based on selected starting note
+// Load sequence with transposition based on selected starting note and octave shift
 function loadSequence(id) {
     const seq = sequences[id];
     if (!seq || seq.notes.length === 0) return;
 
-    // For custom sequences, use notes as-is (no transposition)
+    // For custom sequences, use notes as-is (no transposition from starting note selector)
     if (id === 'custom') {
-        sequenceState.currentSequence = seq.notes.map(n => ({
-            ...n,
-            frequency: n.frequency || getFrequency(n.note, n.octave),
-            name: n.name || `${n.note}${n.octave}`
-        }));
+        sequenceState.currentSequence = seq.notes.map(n => {
+            // Apply octave shift
+            const shiftedOctave = n.octave + octaveShift;
+            return {
+                ...n,
+                octave: shiftedOctave,
+                frequency: getFrequency(n.note, shiftedOctave),
+                name: `${n.note}${shiftedOctave}`
+            };
+        });
     } else {
         // Get the original starting note and the user's selected starting note
         const originalStart = seq.notes[0];
@@ -709,18 +745,21 @@ function loadSequence(id) {
         // Calculate transposition interval
         const transposition = selectedSemitone - originalSemitone;
 
-        // Transpose all notes
+        // Transpose all notes and apply octave shift
         sequenceState.currentSequence = seq.notes.map(n => {
             const originalSemi = noteToSemitone(n.note, n.octave);
             const transposedSemi = originalSemi + transposition;
             const transposed = semitoneToNote(transposedSemi);
 
+            // Apply octave shift
+            const shiftedOctave = transposed.octave + octaveShift;
+
             return {
                 ...n,
                 note: transposed.note,
-                octave: transposed.octave,
-                frequency: getFrequency(transposed.note, transposed.octave),
-                name: `${transposed.note}${transposed.octave}`
+                octave: shiftedOctave,
+                frequency: getFrequency(transposed.note, shiftedOctave),
+                name: `${transposed.note}${shiftedOctave}`
             };
         });
     }
@@ -728,6 +767,11 @@ function loadSequence(id) {
     drawSheetMusic();
     sequenceResults.style.display = 'none';
     sequenceCanvasContainer.classList.remove('active');
+}
+
+// Get tempo-adjusted duration (in ms)
+function getAdjustedDuration(baseDuration) {
+    return baseDuration * (100 / tempoPercent);
 }
 
 // Sheet music drawing
@@ -1072,7 +1116,9 @@ function previewSequence() {
 
         const note = notes[index];
         // Use actual note duration (convert ms to seconds), with a small gap between notes
-        const durationSec = (note.duration / 1000) * 0.9; // 90% of duration, leaving a small gap
+        // Use tempo-adjusted duration (convert ms to seconds), with a small gap between notes
+        const adjustedDuration = getAdjustedDuration(note.duration);
+        const durationSec = (adjustedDuration / 1000) * 0.9; // 90% of duration, leaving a small gap
         playTone(note.frequency, durationSec, () => {
             index++;
             playNext();
@@ -1089,6 +1135,8 @@ async function startSequence() {
     try {
         // Ensure audio context is warmed up and resumed
         await warmUpAudio();
+        // Delay to ensure audio system is fully ready (longer for mobile)
+        await new Promise(resolve => setTimeout(resolve, 100));
         const ctx = getAudioContext();
 
         micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -1124,24 +1172,160 @@ async function startSequence() {
     }
 }
 
+// Pre-created click sound buffer (created on first use)
+let clickBuffer = null;
+
+// Create or get the click sound buffer
+function getClickBuffer(ctx) {
+    if (clickBuffer && clickBuffer.sampleRate === ctx.sampleRate) {
+        return clickBuffer;
+    }
+
+    // Create a short noise burst for a woodblock-like sound
+    const bufferSize = Math.floor(ctx.sampleRate * 0.02); // 20ms of noise
+    clickBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const data = clickBuffer.getChannelData(0);
+
+    // Generate noise
+    for (let i = 0; i < bufferSize; i++) {
+        data[i] = Math.random() * 2 - 1;
+    }
+
+    return clickBuffer;
+}
+
+// Create a single buffer containing all 4 countdown clicks with silence between
+function createCountdownBuffer(ctx, beatIntervalSec, leadInSec = 0) {
+    const sampleRate = ctx.sampleRate;
+    const clickDuration = 0.02; // 20ms per click
+    const clickSamples = Math.floor(sampleRate * clickDuration);
+    const leadInSamples = Math.floor(sampleRate * leadInSec);
+
+    // Total buffer length: lead-in + 4 beats (last click at beat 3, ends at ~beat 3 + click duration)
+    const totalDuration = leadInSec + (3 * beatIntervalSec) + clickDuration;
+    const totalSamples = Math.floor(sampleRate * totalDuration);
+
+    const buffer = ctx.createBuffer(1, totalSamples, sampleRate);
+    const data = buffer.getChannelData(0);
+
+    // Fill with silence first
+    data.fill(0);
+
+    // Add 4 clicks at the appropriate positions (after lead-in)
+    for (let beat = 0; beat < 4; beat++) {
+        const startSample = leadInSamples + Math.floor(beat * beatIntervalSec * sampleRate);
+
+        // Generate noise for this click with decay envelope
+        for (let i = 0; i < clickSamples && (startSample + i) < totalSamples; i++) {
+            const noise = Math.random() * 2 - 1;
+            // Apply decay envelope (starts at 0.6, decays to near 0)
+            const envelope = 0.6 * Math.exp(-i / (sampleRate * 0.005)); // 5ms decay
+            data[startSample + i] = noise * envelope;
+        }
+    }
+
+    return buffer;
+}
+
+// Trigger a visual pulse on the Go/Stop button
+function triggerBeatPulse() {
+    goBtn.classList.add('beat-pulse');
+    setTimeout(() => {
+        goBtn.classList.remove('beat-pulse');
+    }, 100);
+}
+
 // Run countdown before starting
 function runCountdown() {
     if (!sequenceState.isCountingDown) return;
 
-    if (sequenceState.countdownValue > 0) {
-        sequenceStatus.textContent = `Get ready... ${sequenceState.countdownValue}`;
-        drawCountdownVisualization(sequenceState.countdownValue);
-        sequenceState.countdownValue--;
-        setTimeout(runCountdown, 1000);
-    } else {
-        // Countdown finished, start the challenge
-        sequenceState.isCountingDown = false;
-        sequenceState.isPlaying = true;
-        sequenceState.noteStartTime = performance.now();
-        sequenceStatus.textContent = 'Sing!';
-        lastSequenceSampleTime = 0;
-        animationId = requestAnimationFrame(analyzeSequence);
+    const ctx = getAudioContext();
+    // Use the first note's duration as the beat interval to match the tempo of the sequence
+    const firstNoteDuration = sequenceState.currentSequence[0].duration;
+    const beatIntervalMs = getAdjustedDuration(firstNoteDuration);
+    const beatIntervalSec = beatIntervalMs / 1000;
+
+    // Add lead-in silence to let mobile audio fully initialize
+    const leadInSec = 1.5;
+    const leadInMs = leadInSec * 1000;
+
+    // Create a single buffer with all 4 clicks baked in
+    // This is more reliable than scheduling 4 separate sounds
+    const countdownBuffer = createCountdownBuffer(ctx, beatIntervalSec, leadInSec);
+
+    const source = ctx.createBufferSource();
+    source.buffer = countdownBuffer;
+
+    // Bandpass filter for woodblock-like tone
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = 1000;
+    filter.Q.value = 1.5;
+
+    source.connect(filter);
+    filter.connect(ctx.destination);
+
+    // Start playback immediately (buffer has lead-in silence)
+    source.start(ctx.currentTime);
+
+    // Record actual start time and when countdown begins (after lead-in)
+    const actualStartTime = performance.now();
+    const countdownStartTime = actualStartTime + leadInMs;
+
+    // Initial visual state
+    let lastDisplayedBeat = -1;
+    let inLeadIn = true;
+
+    // Show preparing state during lead-in
+    sequenceStatus.textContent = 'Preparing...';
+    drawCountdownVisualization(-1); // -1 = preparing state
+
+    // Use requestAnimationFrame for smooth visual updates
+    function updateVisuals() {
+        if (!sequenceState.isCountingDown) return;
+
+        const now = performance.now();
+
+        // During lead-in period
+        if (now < countdownStartTime) {
+            requestAnimationFrame(updateVisuals);
+            return;
+        }
+
+        const elapsed = now - countdownStartTime;
+        const currentBeat = Math.floor(elapsed / beatIntervalMs);
+
+        // Only update display when beat changes
+        if (currentBeat !== lastDisplayedBeat) {
+            lastDisplayedBeat = currentBeat;
+
+            // Pulse the button on each beat
+            triggerBeatPulse();
+
+            if (currentBeat < 3) {
+                const displayNumber = 3 - currentBeat;
+                drawCountdownVisualization(displayNumber);
+                sequenceStatus.textContent = `Get ready... ${displayNumber}`;
+            } else if (currentBeat === 3) {
+                drawCountdownVisualization(0);
+                sequenceStatus.textContent = 'Sing!';
+            }
+        }
+
+        // Check if countdown is complete (after 4 beats)
+        if (elapsed >= beatIntervalMs * 4) {
+            sequenceState.isCountingDown = false;
+            sequenceState.isPlaying = true;
+            sequenceState.noteStartTime = performance.now();
+            lastSequenceSampleTime = 0;
+            animationId = requestAnimationFrame(analyzeSequence);
+            return;
+        }
+
+        requestAnimationFrame(updateVisuals);
     }
+
+    requestAnimationFrame(updateVisuals);
 }
 
 // Draw countdown screen
@@ -1153,23 +1337,47 @@ function drawCountdownVisualization(count) {
     sequenceCtx.fillStyle = 'rgba(30, 30, 40, 1)';
     sequenceCtx.fillRect(0, 0, width, height);
 
-    // Draw countdown number
-    sequenceCtx.fillStyle = '#4ecdc4';
+    if (count === -1) {
+        // Preparing state (during lead-in)
+        sequenceCtx.fillStyle = '#888';
+        sequenceCtx.font = 'bold 40px sans-serif';
+        sequenceCtx.textAlign = 'center';
+        sequenceCtx.textBaseline = 'middle';
+        sequenceCtx.fillText('Get ready...', width / 2, height / 2 - 10);
+
+        const firstNote = sequenceState.currentSequence[0];
+        sequenceCtx.fillStyle = '#666';
+        sequenceCtx.font = '14px sans-serif';
+        sequenceCtx.fillText(`First note: ${firstNote.name}`, width / 2, height / 2 + 30);
+        return;
+    }
+
+    // Draw countdown number or "GO!"
+    sequenceCtx.fillStyle = count === 0 ? '#6bcb77' : '#4ecdc4';
     sequenceCtx.font = 'bold 80px sans-serif';
     sequenceCtx.textAlign = 'center';
     sequenceCtx.textBaseline = 'middle';
-    sequenceCtx.fillText(count.toString(), width / 2, height / 2 - 20);
+    const displayText = count === 0 ? 'GO!' : count.toString();
+    sequenceCtx.fillText(displayText, width / 2, height / 2 - 20);
 
-    // Draw "Get Ready" text
-    sequenceCtx.fillStyle = '#888';
-    sequenceCtx.font = '18px sans-serif';
-    sequenceCtx.fillText('Get Ready...', width / 2, height / 2 + 40);
+    if (count > 0) {
+        // Draw "Get Ready" text
+        sequenceCtx.fillStyle = '#888';
+        sequenceCtx.font = '18px sans-serif';
+        sequenceCtx.fillText('Get Ready...', width / 2, height / 2 + 40);
 
-    // Draw first note preview
-    const firstNote = sequenceState.currentSequence[0];
-    sequenceCtx.fillStyle = '#666';
-    sequenceCtx.font = '14px sans-serif';
-    sequenceCtx.fillText(`First note: ${firstNote.name}`, width / 2, height / 2 + 70);
+        // Draw first note preview
+        const firstNote = sequenceState.currentSequence[0];
+        sequenceCtx.fillStyle = '#666';
+        sequenceCtx.font = '14px sans-serif';
+        sequenceCtx.fillText(`First note: ${firstNote.name}`, width / 2, height / 2 + 70);
+    } else {
+        // Draw "Start singing" text for GO
+        const firstNote = sequenceState.currentSequence[0];
+        sequenceCtx.fillStyle = '#6bcb77';
+        sequenceCtx.font = '18px sans-serif';
+        sequenceCtx.fillText(`Sing: ${firstNote.name}`, width / 2, height / 2 + 50);
+    }
 }
 
 // Stop sequence
@@ -1206,6 +1414,7 @@ function analyzeSequence(timestamp) {
     if (!sequenceState.isPlaying) return;
 
     const currentNote = sequenceState.currentSequence[sequenceState.currentNoteIndex];
+    const adjustedDuration = getAdjustedDuration(currentNote.duration);
     const elapsed = timestamp - sequenceState.noteStartTime;
 
     // Sample pitch at fixed rate
@@ -1231,22 +1440,23 @@ function analyzeSequence(timestamp) {
         }
     }
 
-    // Check if note time has expired
-    if (elapsed >= currentNote.duration) {
+    // Check if note time has expired (using tempo-adjusted duration)
+    if (elapsed >= adjustedDuration) {
         advanceNote();
     }
 
-    drawSequenceVisualization(elapsed, currentNote.duration);
+    drawSequenceVisualization(elapsed, adjustedDuration);
     animationId = requestAnimationFrame(analyzeSequence);
 }
 
 // Advance to next note
 function advanceNote() {
     const currentNote = sequenceState.currentSequence[sequenceState.currentNoteIndex];
+    const adjustedDuration = getAdjustedDuration(currentNote.duration);
     const score = calculateNoteScore(
         sequenceState.pitchSamplesForNote,
         sequenceState.timeOnPitch,
-        currentNote.duration
+        adjustedDuration
     );
 
     sequenceState.noteScores.push({
@@ -1265,6 +1475,9 @@ function advanceNote() {
     sequenceState.timeOnPitch = 0;
     sequenceState.noteStartTime = performance.now();
     recentPitches.length = 0;
+
+    // Pulse the button on each note change
+    triggerBeatPulse();
 
     if (sequenceState.currentNoteIndex >= sequenceState.currentSequence.length) {
         finishSequence();
@@ -1560,6 +1773,34 @@ startNoteSelect.addEventListener('change', () => {
 
 startOctaveSelect.addEventListener('change', () => {
     loadSequence(sequenceSelect.value);
+});
+
+// Octave shift controls
+octaveDownBtn.addEventListener('click', () => {
+    if (octaveShift > -2) {
+        octaveShift--;
+        updateOctaveShiftDisplay();
+        loadSequence(sequenceSelect.value);
+    }
+});
+
+octaveUpBtn.addEventListener('click', () => {
+    if (octaveShift < 2) {
+        octaveShift++;
+        updateOctaveShiftDisplay();
+        loadSequence(sequenceSelect.value);
+    }
+});
+
+function updateOctaveShiftDisplay() {
+    const prefix = octaveShift > 0 ? '+' : '';
+    octaveShiftDisplay.textContent = prefix + octaveShift;
+}
+
+// Tempo control
+tempoSlider.addEventListener('input', () => {
+    tempoPercent = parseInt(tempoSlider.value);
+    tempoDisplay.textContent = tempoPercent + '%';
 });
 
 previewBtn.addEventListener('click', previewSequence);

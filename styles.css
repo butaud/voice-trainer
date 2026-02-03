@@ -129,12 +129,13 @@ section {
 }
 
 .btn-record.recording {
-    animation: pulse 1s infinite;
+    transition: transform 0.1s ease-out, filter 0.1s ease-out, box-shadow 0.1s ease-out;
 }
 
-@keyframes pulse {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 107, 107, 0.7); }
-    50% { box-shadow: 0 0 0 15px rgba(255, 107, 107, 0); }
+.btn-record.beat-pulse {
+    transform: scale(1.08);
+    filter: brightness(1.2);
+    box-shadow: 0 0 0 10px rgba(255, 107, 107, 0.4);
 }
 
 .status {
@@ -358,6 +359,104 @@ section {
 .starting-note-selector select option {
     background: #1a1a2e;
     color: #fff;
+}
+
+/* Sequence Options (Octave Shift & Tempo) */
+.sequence-options {
+    display: flex;
+    justify-content: center;
+    gap: 2rem;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+}
+
+.option-group {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.option-group label {
+    color: #888;
+    font-size: 0.9rem;
+}
+
+.octave-shift-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.shift-btn {
+    width: 36px;
+    height: 36px;
+    border: 2px solid rgba(78, 205, 196, 0.5);
+    border-radius: 6px;
+    background: rgba(78, 205, 196, 0.1);
+    color: #4ecdc4;
+    font-size: 1.2rem;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.shift-btn:hover {
+    background: rgba(78, 205, 196, 0.2);
+    border-color: #4ecdc4;
+}
+
+.shift-btn:active {
+    transform: scale(0.95);
+}
+
+#octave-shift-display {
+    min-width: 30px;
+    text-align: center;
+    font-weight: bold;
+    color: #4ecdc4;
+}
+
+.tempo-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+#tempo-slider {
+    width: 100px;
+    height: 6px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+    outline: none;
+}
+
+#tempo-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #4ecdc4;
+    cursor: pointer;
+}
+
+#tempo-slider::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #4ecdc4;
+    cursor: pointer;
+    border: none;
+}
+
+#tempo-display {
+    min-width: 45px;
+    text-align: center;
+    font-weight: bold;
+    color: #4ecdc4;
+    font-size: 0.9rem;
 }
 
 .sequence-selector select {

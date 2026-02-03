@@ -76,9 +76,17 @@
                     <option value="octave-jump">Octave Jump - Beginner</option>
                     <option value="major-arpeggio">Major Arpeggio - Intermediate</option>
                     <option value="full-scale">Full Scale Up - Advanced</option>
+                    <option value="custom">Custom (Import MusicXML)</option>
                 </select>
             </div>
-            <div class="starting-note-selector">
+            <div id="musicxml-import" class="musicxml-import" style="display: none;">
+                <label class="import-btn">
+                    <input type="file" id="musicxml-file" accept=".xml,.musicxml,.mxl">
+                    Choose MusicXML File
+                </label>
+                <span id="musicxml-filename" class="musicxml-filename"></span>
+            </div>
+            <div id="starting-note-container" class="starting-note-selector">
                 <label>Starting note:</label>
                 <select id="start-note-select">
                     <option value="C">C</option>

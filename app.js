@@ -10,47 +10,163 @@ let animationId = null;
 // Note frequencies
 const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
+// Note types: whole, half, quarter, eighth (and dotted variants)
+const NOTE_TYPES = {
+    WHOLE: 'whole',
+    HALF: 'half',
+    QUARTER: 'quarter',
+    EIGHTH: 'eighth'
+};
+
 // Predefined sequences
 const sequences = {
     'simple-scale': {
         name: 'Simple Scale (C-E)',
         notes: [
-            { note: 'C', octave: 3, duration: 1800 },
-            { note: 'D', octave: 3, duration: 1800 },
-            { note: 'E', octave: 3, duration: 1800 }
+            { note: 'C', octave: 3, duration: 1800, noteType: NOTE_TYPES.QUARTER },
+            { note: 'D', octave: 3, duration: 1800, noteType: NOTE_TYPES.QUARTER },
+            { note: 'E', octave: 3, duration: 1800, noteType: NOTE_TYPES.QUARTER }
         ]
     },
     'octave-jump': {
         name: 'Octave Jump',
         notes: [
-            { note: 'C', octave: 3, duration: 1500 },
-            { note: 'C', octave: 4, duration: 1500 },
-            { note: 'C', octave: 3, duration: 1500 }
+            { note: 'C', octave: 3, duration: 1500, noteType: NOTE_TYPES.QUARTER },
+            { note: 'C', octave: 4, duration: 1500, noteType: NOTE_TYPES.QUARTER },
+            { note: 'C', octave: 3, duration: 1500, noteType: NOTE_TYPES.QUARTER }
         ]
     },
     'major-arpeggio': {
         name: 'Major Arpeggio',
         notes: [
-            { note: 'C', octave: 3, duration: 1200 },
-            { note: 'E', octave: 3, duration: 1200 },
-            { note: 'G', octave: 3, duration: 1200 },
-            { note: 'C', octave: 4, duration: 1200 }
+            { note: 'C', octave: 3, duration: 1200, noteType: NOTE_TYPES.QUARTER },
+            { note: 'E', octave: 3, duration: 1200, noteType: NOTE_TYPES.QUARTER },
+            { note: 'G', octave: 3, duration: 1200, noteType: NOTE_TYPES.QUARTER },
+            { note: 'C', octave: 4, duration: 1200, noteType: NOTE_TYPES.QUARTER }
         ]
     },
     'full-scale': {
         name: 'Full Scale Up',
         notes: [
-            { note: 'C', octave: 3, duration: 1000 },
-            { note: 'D', octave: 3, duration: 1000 },
-            { note: 'E', octave: 3, duration: 1000 },
-            { note: 'F', octave: 3, duration: 1000 },
-            { note: 'G', octave: 3, duration: 1000 },
-            { note: 'A', octave: 3, duration: 1000 },
-            { note: 'B', octave: 3, duration: 1000 },
-            { note: 'C', octave: 4, duration: 1000 }
+            { note: 'C', octave: 3, duration: 1000, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'D', octave: 3, duration: 1000, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'E', octave: 3, duration: 1000, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'F', octave: 3, duration: 1000, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'G', octave: 3, duration: 1000, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'A', octave: 3, duration: 1000, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'B', octave: 3, duration: 1000, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'C', octave: 4, duration: 1000, noteType: NOTE_TYPES.EIGHTH }
         ]
+    },
+    'custom': {
+        name: 'Custom',
+        notes: []
     }
 };
+
+// MusicXML Parser
+function parseMusicXML(xmlString) {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(xmlString, 'text/xml');
+
+    // Check for parsing errors
+    const parseError = doc.querySelector('parsererror');
+    if (parseError) {
+        throw new Error('Invalid MusicXML file');
+    }
+
+    // Get the first part (part-wise MusicXML)
+    const part = doc.querySelector('part');
+    if (!part) {
+        throw new Error('No parts found in MusicXML');
+    }
+
+    // Get tempo (default to 120 BPM if not specified)
+    let tempo = 120;
+    const soundEl = doc.querySelector('sound[tempo]');
+    if (soundEl) {
+        tempo = parseFloat(soundEl.getAttribute('tempo'));
+    }
+
+    // Get divisions (how many divisions per quarter note)
+    const divisionsEl = doc.querySelector('divisions');
+    const divisions = divisionsEl ? parseInt(divisionsEl.textContent) : 1;
+
+    // Calculate ms per division
+    const msPerBeat = 60000 / tempo; // ms per quarter note
+    const msPerDivision = msPerBeat / divisions;
+
+    const notes = [];
+
+    // Process all measures
+    const measures = part.querySelectorAll('measure');
+    measures.forEach(measure => {
+        const noteEls = measure.querySelectorAll('note');
+        noteEls.forEach(noteEl => {
+            // Skip rests
+            if (noteEl.querySelector('rest')) return;
+
+            // Skip chord notes (only take the first note of a chord)
+            if (noteEl.querySelector('chord')) return;
+
+            // Get pitch
+            const pitchEl = noteEl.querySelector('pitch');
+            if (!pitchEl) return;
+
+            const step = pitchEl.querySelector('step')?.textContent || 'C';
+            const octave = parseInt(pitchEl.querySelector('octave')?.textContent || '4');
+            const alter = parseInt(pitchEl.querySelector('alter')?.textContent || '0');
+
+            // Convert alter to sharp/flat
+            let noteName = step;
+            if (alter === 1) noteName += '#';
+            else if (alter === -1) {
+                // Convert flat to equivalent sharp
+                const flatToSharp = { 'D': 'C#', 'E': 'D#', 'G': 'F#', 'A': 'G#', 'B': 'A#' };
+                if (flatToSharp[step]) {
+                    noteName = flatToSharp[step];
+                }
+            }
+
+            // Get duration
+            const durationEl = noteEl.querySelector('duration');
+            const duration = durationEl ? parseInt(durationEl.textContent) : divisions;
+            const durationMs = duration * msPerDivision;
+
+            // Get note type
+            const typeEl = noteEl.querySelector('type');
+            const typeText = typeEl?.textContent || 'quarter';
+
+            // Check for dotted
+            const dotted = noteEl.querySelector('dot') !== null;
+
+            // Map MusicXML type to our note types
+            let noteType;
+            switch (typeText) {
+                case 'whole': noteType = NOTE_TYPES.WHOLE; break;
+                case 'half': noteType = NOTE_TYPES.HALF; break;
+                case 'quarter': noteType = NOTE_TYPES.QUARTER; break;
+                case 'eighth': noteType = NOTE_TYPES.EIGHTH; break;
+                case '16th': noteType = NOTE_TYPES.EIGHTH; break; // Treat 16th as eighth for now
+                default: noteType = NOTE_TYPES.QUARTER;
+            }
+
+            notes.push({
+                note: noteName,
+                octave: octave,
+                duration: durationMs,
+                noteType: noteType,
+                dotted: dotted
+            });
+        });
+    });
+
+    if (notes.length === 0) {
+        throw new Error('No notes found in MusicXML');
+    }
+
+    return notes;
+}
 
 // Sequence state
 const sequenceState = {
@@ -528,6 +644,10 @@ const resultsPercent = document.getElementById('results-percent');
 const resultsBreakdown = document.getElementById('results-breakdown');
 const retryBtn = document.getElementById('retry-btn');
 const sequenceStatus = document.getElementById('sequence-status');
+const musicxmlImport = document.getElementById('musicxml-import');
+const musicxmlFile = document.getElementById('musicxml-file');
+const musicxmlFilename = document.getElementById('musicxml-filename');
+const startingNoteContainer = document.getElementById('starting-note-container');
 
 // Mode toggle
 function setMode(mode) {
@@ -568,33 +688,42 @@ function semitoneToNote(semitone) {
 // Load sequence with transposition based on selected starting note
 function loadSequence(id) {
     const seq = sequences[id];
-    if (!seq) return;
+    if (!seq || seq.notes.length === 0) return;
 
-    // Get the original starting note and the user's selected starting note
-    const originalStart = seq.notes[0];
-    const originalSemitone = noteToSemitone(originalStart.note, originalStart.octave);
-
-    const selectedNote = startNoteSelect.value;
-    const selectedOctave = parseInt(startOctaveSelect.value);
-    const selectedSemitone = noteToSemitone(selectedNote, selectedOctave);
-
-    // Calculate transposition interval
-    const transposition = selectedSemitone - originalSemitone;
-
-    // Transpose all notes
-    sequenceState.currentSequence = seq.notes.map(n => {
-        const originalSemi = noteToSemitone(n.note, n.octave);
-        const transposedSemi = originalSemi + transposition;
-        const transposed = semitoneToNote(transposedSemi);
-
-        return {
+    // For custom sequences, use notes as-is (no transposition)
+    if (id === 'custom') {
+        sequenceState.currentSequence = seq.notes.map(n => ({
             ...n,
-            note: transposed.note,
-            octave: transposed.octave,
-            frequency: getFrequency(transposed.note, transposed.octave),
-            name: `${transposed.note}${transposed.octave}`
-        };
-    });
+            frequency: n.frequency || getFrequency(n.note, n.octave),
+            name: n.name || `${n.note}${n.octave}`
+        }));
+    } else {
+        // Get the original starting note and the user's selected starting note
+        const originalStart = seq.notes[0];
+        const originalSemitone = noteToSemitone(originalStart.note, originalStart.octave);
+
+        const selectedNote = startNoteSelect.value;
+        const selectedOctave = parseInt(startOctaveSelect.value);
+        const selectedSemitone = noteToSemitone(selectedNote, selectedOctave);
+
+        // Calculate transposition interval
+        const transposition = selectedSemitone - originalSemitone;
+
+        // Transpose all notes
+        sequenceState.currentSequence = seq.notes.map(n => {
+            const originalSemi = noteToSemitone(n.note, n.octave);
+            const transposedSemi = originalSemi + transposition;
+            const transposed = semitoneToNote(transposedSemi);
+
+            return {
+                ...n,
+                note: transposed.note,
+                octave: transposed.octave,
+                frequency: getFrequency(transposed.note, transposed.octave),
+                name: `${transposed.note}${transposed.octave}`
+            };
+        });
+    }
 
     drawSheetMusic();
     sequenceResults.style.display = 'none';
@@ -712,8 +841,8 @@ function drawBassClef(ctx, x, staffTop, lineSpacing) {
     ctx.restore();
 }
 
-// Draw a note with stem
-function drawNote(ctx, x, y, isSharp, isActive, isCompleted, staffMiddleY, score = null) {
+// Draw a note with stem (supports different note types)
+function drawNote(ctx, x, y, isSharp, isActive, isCompleted, staffMiddleY, score = null, noteType = NOTE_TYPES.QUARTER, dotted = false) {
     ctx.save();
 
     // Determine colors
@@ -740,24 +869,75 @@ function drawNote(ctx, x, y, isSharp, isActive, isCompleted, staffMiddleY, score
     // Note head dimensions
     const noteWidth = 7;
     const noteHeight = 5;
-
-    // Draw filled note head (oval, slightly tilted)
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.ellipse(x, y, noteWidth, noteHeight, -0.3, 0, 2 * Math.PI);
-    ctx.fill();
-
-    // Draw stem
     const stemHeight = 30;
     const stemWidth = 1.5;
 
-    // Stem goes down (left side) if note is on or above middle line, up (right side) if below
-    if (y <= staffMiddleY) {
-        // Stem down (on left side of note)
-        ctx.fillRect(x - noteWidth + 1, y, stemWidth, stemHeight);
+    // Determine if note head should be filled or hollow
+    const isHollow = noteType === NOTE_TYPES.WHOLE || noteType === NOTE_TYPES.HALF;
+    const hasStem = noteType !== NOTE_TYPES.WHOLE;
+    const hasFlag = noteType === NOTE_TYPES.EIGHTH;
+
+    // Stem direction: down if on or above middle line, up if below
+    const stemDown = y <= staffMiddleY;
+
+    // Draw note head
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    if (noteType === NOTE_TYPES.WHOLE) {
+        // Whole note: wider, more horizontal oval
+        ctx.ellipse(x, y, noteWidth + 2, noteHeight, 0, 0, 2 * Math.PI);
     } else {
-        // Stem up (on right side of note)
-        ctx.fillRect(x + noteWidth - stemWidth - 1, y - stemHeight, stemWidth, stemHeight);
+        // Other notes: tilted oval
+        ctx.ellipse(x, y, noteWidth, noteHeight, -0.3, 0, 2 * Math.PI);
+    }
+
+    if (isHollow) {
+        ctx.lineWidth = 2;
+        ctx.stroke();
+    } else {
+        ctx.fill();
+    }
+
+    // Draw stem
+    if (hasStem) {
+        if (stemDown) {
+            // Stem down (on left side of note)
+            ctx.fillRect(x - noteWidth + 1, y, stemWidth, stemHeight);
+
+            // Draw flag for eighth note (stem down)
+            if (hasFlag) {
+                ctx.beginPath();
+                ctx.moveTo(x - noteWidth + 1 + stemWidth, y + stemHeight);
+                ctx.quadraticCurveTo(
+                    x - noteWidth + 15, y + stemHeight - 5,
+                    x - noteWidth + 12, y + stemHeight - 15
+                );
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+        } else {
+            // Stem up (on right side of note)
+            ctx.fillRect(x + noteWidth - stemWidth - 1, y - stemHeight, stemWidth, stemHeight);
+
+            // Draw flag for eighth note (stem up)
+            if (hasFlag) {
+                ctx.beginPath();
+                ctx.moveTo(x + noteWidth - 1, y - stemHeight);
+                ctx.quadraticCurveTo(
+                    x + noteWidth + 10, y - stemHeight + 5,
+                    x + noteWidth + 8, y - stemHeight + 15
+                );
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+        }
+    }
+
+    // Draw dot for dotted notes
+    if (dotted) {
+        ctx.beginPath();
+        ctx.arc(x + noteWidth + 5, y, 2, 0, 2 * Math.PI);
+        ctx.fill();
     }
 
     // Draw sharp if needed
@@ -863,7 +1043,7 @@ function drawSheetMusic(activeIndex = -1, completedUpTo = -1, noteScores = null)
         drawLedgerLines(ctx, x, y, staffTop, lineSpacing, clef);
 
         // Draw the note
-        drawNote(ctx, x, y, isSharp, isActive, isCompleted, staffMiddleY, score);
+        drawNote(ctx, x, y, isSharp, isActive, isCompleted, staffMiddleY, score, note.noteType || NOTE_TYPES.QUARTER, note.dotted || false);
     });
 }
 
@@ -891,7 +1071,9 @@ function previewSequence() {
         drawSheetMusic(index, index);
 
         const note = notes[index];
-        playTone(note.frequency, 0.8, () => {
+        // Use actual note duration (convert ms to seconds), with a small gap between notes
+        const durationSec = (note.duration / 1000) * 0.9; // 90% of duration, leaving a small gap
+        playTone(note.frequency, durationSec, () => {
             index++;
             playNext();
         });
@@ -1354,7 +1536,22 @@ modeFreeBtn.addEventListener('click', () => setMode('free'));
 modeSequenceBtn.addEventListener('click', () => setMode('sequence'));
 
 sequenceSelect.addEventListener('change', () => {
-    loadSequence(sequenceSelect.value);
+    const isCustom = sequenceSelect.value === 'custom';
+    musicxmlImport.style.display = isCustom ? '' : 'none';
+    // Hide starting note selector for custom sequences (they use their own starting notes)
+    startingNoteContainer.style.display = isCustom ? 'none' : '';
+
+    if (!isCustom) {
+        loadSequence(sequenceSelect.value);
+    } else {
+        // Clear sheet music if no custom sequence loaded yet
+        if (sequences['custom'].notes.length === 0) {
+            sequenceState.currentSequence = [];
+            drawSheetMusic();
+        } else {
+            loadSequence('custom');
+        }
+    }
 });
 
 startNoteSelect.addEventListener('change', () => {
@@ -1379,4 +1576,35 @@ retryBtn.addEventListener('click', () => {
     sequenceResults.style.display = 'none';
     drawSheetMusic();
     startSequence();
+});
+
+// MusicXML file import handler
+musicxmlFile.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    musicxmlFilename.textContent = file.name;
+    sequenceStatus.textContent = 'Loading...';
+
+    try {
+        const text = await file.text();
+        const notes = parseMusicXML(text);
+
+        // Store in custom sequence
+        sequences['custom'].notes = notes;
+
+        // Load the custom sequence
+        loadSequence('custom');
+
+        sequenceStatus.textContent = `Loaded ${notes.length} notes from ${file.name}`;
+        setTimeout(() => {
+            if (sequenceStatus.textContent.startsWith('Loaded')) {
+                sequenceStatus.textContent = '';
+            }
+        }, 3000);
+    } catch (err) {
+        console.error('MusicXML parse error:', err);
+        sequenceStatus.textContent = `Error: ${err.message}`;
+        musicxmlFilename.textContent = '';
+    }
 });

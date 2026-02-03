@@ -201,7 +201,7 @@ function parseMusicXMLPart(doc, partId) {
 
 // Sequence state
 const sequenceState = {
-    isSequenceMode: false,
+    isSequenceMode: true,
     isPlaying: false,
     isPreviewing: false,
     isCountingDown: false,
@@ -703,14 +703,10 @@ const musicxmlFilename = document.getElementById('musicxml-filename');
 const musicxmlPartSelector = document.getElementById('musicxml-part-selector');
 const musicxmlPartSelect = document.getElementById('musicxml-part-select');
 const startingNoteContainer = document.getElementById('starting-note-container');
-const octaveDownBtn = document.getElementById('octave-down-btn');
-const octaveUpBtn = document.getElementById('octave-up-btn');
-const octaveShiftDisplay = document.getElementById('octave-shift-display');
 const tempoSlider = document.getElementById('tempo-slider');
 const tempoDisplay = document.getElementById('tempo-display');
 
 // Sequence configuration state
-let octaveShift = 0;
 let tempoPercent = 100;
 
 // Mode toggle
@@ -749,57 +745,45 @@ function semitoneToNote(semitone) {
     return { note: noteNames[noteIndex], octave };
 }
 
-// Load sequence with transposition based on selected starting note and octave shift
+// Load sequence with transposition based on selected starting note
 function loadSequence(id) {
     const seq = sequences[id];
     if (!seq || seq.notes.length === 0) return;
 
-    // For custom sequences, use notes as-is (no transposition from starting note selector)
-    if (id === 'custom') {
-        sequenceState.currentSequence = seq.notes.map(n => {
-            // Apply octave shift
-            const shiftedOctave = n.octave + octaveShift;
-            return {
-                ...n,
-                octave: shiftedOctave,
-                frequency: getFrequency(n.note, shiftedOctave),
-                name: `${n.note}${shiftedOctave}`
-            };
-        });
-    } else {
-        // Get the original starting note and the user's selected starting note
-        const originalStart = seq.notes[0];
-        const originalSemitone = noteToSemitone(originalStart.note, originalStart.octave);
+    // Get the original starting note and the user's selected starting note
+    const originalStart = seq.notes[0];
+    const originalSemitone = noteToSemitone(originalStart.note, originalStart.octave);
 
-        const selectedNote = startNoteSelect.value;
-        const selectedOctave = parseInt(startOctaveSelect.value);
-        const selectedSemitone = noteToSemitone(selectedNote, selectedOctave);
+    const selectedNote = startNoteSelect.value;
+    const selectedOctave = parseInt(startOctaveSelect.value);
+    const selectedSemitone = noteToSemitone(selectedNote, selectedOctave);
 
-        // Calculate transposition interval
-        const transposition = selectedSemitone - originalSemitone;
+    // Calculate transposition interval
+    const transposition = selectedSemitone - originalSemitone;
 
-        // Transpose all notes and apply octave shift
-        sequenceState.currentSequence = seq.notes.map(n => {
-            const originalSemi = noteToSemitone(n.note, n.octave);
-            const transposedSemi = originalSemi + transposition;
-            const transposed = semitoneToNote(transposedSemi);
+    // Transpose all notes
+    sequenceState.currentSequence = seq.notes.map(n => {
+        const originalSemi = noteToSemitone(n.note, n.octave);
+        const transposedSemi = originalSemi + transposition;
+        const transposed = semitoneToNote(transposedSemi);
 
-            // Apply octave shift
-            const shiftedOctave = transposed.octave + octaveShift;
-
-            return {
-                ...n,
-                note: transposed.note,
-                octave: shiftedOctave,
-                frequency: getFrequency(transposed.note, shiftedOctave),
-                name: `${transposed.note}${shiftedOctave}`
-            };
-        });
-    }
+        return {
+            ...n,
+            note: transposed.note,
+            octave: transposed.octave,
+            frequency: getFrequency(transposed.note, transposed.octave),
+            name: `${transposed.note}${transposed.octave}`
+        };
+    });
 
     drawSheetMusic();
     sequenceResults.style.display = 'none';
     sequenceCanvasContainer.classList.remove('active');
+
+    // Sync song practice mini-staff (if initialized)
+    if (typeof updateSongPracticeMiniStaff === 'function') {
+        updateSongPracticeMiniStaff();
+    }
 }
 
 // Get tempo-adjusted duration (in ms)
@@ -847,72 +831,55 @@ function getYForStaffPosition(staffPos, clef, staffTop, lineSpacing) {
     return bottomLineY - (positionDiff * lineSpacing / 2);
 }
 
-// Draw a treble clef
+// SVG path for treble clef
+const TREBLE_CLEF_PATH = "m51.688 5.25c-5.427-0.1409-11.774 12.818-11.563 24.375 0.049 3.52 1.16 10.659 2.781 19.625-10.223 10.581-22.094 21.44-22.094 35.688-0.163 13.057 7.817 29.692 26.75 29.532 2.906-0.02 5.521-0.38 7.844-1 1.731 9.49 2.882 16.98 2.875 20.44 0.061 13.64-17.86 14.99-18.719 7.15 3.777-0.13 6.782-3.13 6.782-6.84 0-3.79-3.138-6.88-7.032-6.88-2.141 0-4.049 0.94-5.343 2.41-0.03 0.03-0.065 0.06-0.094 0.09-0.292 0.31-0.538 0.68-0.781 1.1-0.798 1.35-1.316 3.29-1.344 6.06 0 11.42 28.875 18.77 28.875-3.75 0.045-3.03-1.258-10.72-3.156-20.41 20.603-7.45 15.427-38.04-3.531-38.184-1.47 0.015-2.887 0.186-4.25 0.532-1.08-5.197-2.122-10.241-3.032-14.876 7.199-7.071 13.485-16.224 13.344-33.093 0.022-12.114-4.014-21.828-8.312-21.969zm1.281 11.719c2.456-0.237 4.406 2.043 4.406 7.062 0.199 8.62-5.84 16.148-13.031 23.719-0.688-4.147-1.139-7.507-1.188-9.5 0.204-13.466 5.719-20.886 9.813-21.281zm-7.719 44.687c0.877 4.515 1.824 9.272 2.781 14.063-12.548 4.464-18.57 21.954-0.781 29.781-10.843-9.231-5.506-20.158 2.312-22.062 1.966 9.816 3.886 19.502 5.438 27.872-2.107 0.74-4.566 1.17-7.438 1.19-7.181 0-21.531-4.57-21.531-21.875 0-14.494 10.047-20.384 19.219-28.969zm6.094 21.469c0.313-0.019 0.652-0.011 0.968 0 13.063 0 17.99 20.745 4.688 27.375-1.655-8.32-3.662-17.86-5.656-27.375z";
+
+// SVG path for bass clef body (with group translate applied from original)
+const BASS_CLEF_PATH = "m13.976 0.23c-8.785 0.21-15.515 6.36-13.334 15.79 0.002 0.01 0.013 0.02 0.016 0.03 0.256 3.25 2.96 5.81 6.276 5.81 3.485 0 6.309-2.82 6.309-6.3 0-3.08-2.191-5.64-5.098-6.2-1.158-0.41-2.896-1.34-2.82-2.84 0.036-0.74 0.903-2.09 2.294-2.77 1.691-0.79 3.434-1.22 5.194-0.86 2.667 0.49 9.489 5.39 10.019 13.88 0.31 6.44-3.31 15.15-6.849 19.27-5.698 6.51-14.851 10.55-13.955 11.27 0.803 0.72 11.61-4.22 17.237-10.42 6.867-7.44 10.267-13.64 9.937-21.17-0.19-7.54-6.03-15.7-15.226-15.49z";
+
+// Draw a treble clef using SVG path
 function drawTrebleClef(ctx, x, staffTop, lineSpacing) {
     ctx.save();
-    ctx.strokeStyle = '#999';
     ctx.fillStyle = '#999';
-    ctx.lineWidth = 2;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
 
-    // G line is the second line from bottom (staffTop + 3 * lineSpacing)
-    const gLineY = staffTop + 3 * lineSpacing;
-    const cx = x + 18;
+    // Scale based on line spacing (base scale 0.50 for lineSpacing=10)
+    const scale = (lineSpacing / 10) * 0.50;
+    const offsetX = x - 4 * (lineSpacing / 10);
+    // The G-circle in the SVG needs to align with G line (staffTop + 3*lineSpacing)
+    const offsetY = staffTop - 1.75 * lineSpacing;
 
-    // Draw using a series of arcs and lines to form treble clef shape
-    // Vertical line through the clef
-    ctx.beginPath();
-    ctx.moveTo(cx, staffTop - 5);
-    ctx.lineTo(cx, staffTop + 4.5 * lineSpacing);
-    ctx.stroke();
+    ctx.translate(offsetX, offsetY);
+    ctx.scale(scale, scale);
 
-    // Main curved part that wraps around G line
-    ctx.beginPath();
-    ctx.arc(cx - 1, gLineY, lineSpacing * 0.9, 0, Math.PI * 1.9);
-    ctx.stroke();
-
-    // Upper spiral
-    ctx.beginPath();
-    ctx.arc(cx + 2, staffTop + 1.2 * lineSpacing, lineSpacing * 1.1, Math.PI * 0.5, Math.PI * 2);
-    ctx.stroke();
-
-    // Bottom curl
-    ctx.beginPath();
-    ctx.arc(cx - 5, staffTop + 4.8 * lineSpacing, lineSpacing * 0.5, Math.PI * 1.5, Math.PI * 0.8);
-    ctx.stroke();
+    const path = new Path2D(TREBLE_CLEF_PATH);
+    ctx.fill(path);
 
     ctx.restore();
 }
 
-// Draw a bass clef using bezier curves
+// Draw a bass clef using SVG path
 function drawBassClef(ctx, x, staffTop, lineSpacing) {
     ctx.save();
-    ctx.strokeStyle = '#999';
     ctx.fillStyle = '#999';
-    ctx.lineWidth = 2.5;
-    ctx.lineCap = 'round';
 
-    const scale = lineSpacing / 10;
-    const cx = x + 12;
-    const cy = staffTop + lineSpacing; // Center on F line
+    // Scale 0.75 for lineSpacing=10, position to align with F line
+    const scale = (lineSpacing / 10) * 0.75;
+    const offsetX = x + 6 * (lineSpacing / 10);
+    const offsetY = staffTop - 0.3 * lineSpacing;
 
-    // Main curve
+    ctx.translate(offsetX, offsetY);
+    ctx.scale(scale, scale);
+
+    // Draw main body
+    const path = new Path2D(BASS_CLEF_PATH);
+    ctx.fill(path);
+
+    // Draw two dots (positions from original SVG)
     ctx.beginPath();
-    ctx.arc(cx, cy + 2*scale, 8*scale, -0.8 * Math.PI, 0.5 * Math.PI);
-    ctx.stroke();
-
-    // Head dot
-    ctx.beginPath();
-    ctx.arc(cx - 2*scale, cy - 2*scale, 3.5*scale, 0, 2 * Math.PI);
-    ctx.fill();
-
-    // Two dots
-    ctx.beginPath();
-    ctx.arc(cx + 14*scale, cy - 3*scale, 2*scale, 0, 2 * Math.PI);
+    ctx.arc(36, 9.5, 5, 0, Math.PI * 2);
     ctx.fill();
     ctx.beginPath();
-    ctx.arc(cx + 14*scale, cy + 7*scale, 2*scale, 0, 2 * Math.PI);
+    ctx.arc(36, 22.6, 5, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.restore();
@@ -1476,6 +1443,8 @@ function analyzeSequence(timestamp) {
     // Check if note time has expired (using tempo-adjusted duration)
     if (elapsed >= adjustedDuration) {
         advanceNote();
+        // Check if sequence finished
+        if (!sequenceState.isPlaying) return;
     }
 
     drawSequenceVisualization(elapsed, adjustedDuration);
@@ -1784,8 +1753,10 @@ modeSequenceBtn.addEventListener('click', () => setMode('sequence'));
 sequenceSelect.addEventListener('change', () => {
     const isCustom = sequenceSelect.value === 'custom';
     musicxmlImport.style.display = isCustom ? '' : 'none';
-    // Hide starting note selector for custom sequences (they use their own starting notes)
-    startingNoteContainer.style.display = isCustom ? 'none' : '';
+    // Hide part selector when not in custom mode
+    if (!isCustom) {
+        musicxmlPartSelector.style.display = 'none';
+    }
 
     if (!isCustom) {
         loadSequence(sequenceSelect.value);
@@ -1807,28 +1778,6 @@ startNoteSelect.addEventListener('change', () => {
 startOctaveSelect.addEventListener('change', () => {
     loadSequence(sequenceSelect.value);
 });
-
-// Octave shift controls
-octaveDownBtn.addEventListener('click', () => {
-    if (octaveShift > -2) {
-        octaveShift--;
-        updateOctaveShiftDisplay();
-        loadSequence(sequenceSelect.value);
-    }
-});
-
-octaveUpBtn.addEventListener('click', () => {
-    if (octaveShift < 2) {
-        octaveShift++;
-        updateOctaveShiftDisplay();
-        loadSequence(sequenceSelect.value);
-    }
-});
-
-function updateOctaveShiftDisplay() {
-    const prefix = octaveShift > 0 ? '+' : '';
-    octaveShiftDisplay.textContent = prefix + octaveShift;
-}
 
 // Tempo control
 tempoSlider.addEventListener('input', () => {
@@ -1911,6 +1860,14 @@ musicxmlPartSelect.addEventListener('change', () => {
 // Helper to load custom sequence
 function loadCustomSequence(notes, filename) {
     sequences['custom'].notes = notes;
+
+    // Set starting note selector to match the first note of the custom sequence
+    if (notes.length > 0) {
+        const firstNote = notes[0];
+        startNoteSelect.value = firstNote.note;
+        startOctaveSelect.value = firstNote.octave.toString();
+    }
+
     loadSequence('custom');
 
     const partName = musicxmlPartSelector.style.display !== 'none'
@@ -1923,3 +1880,727 @@ function loadCustomSequence(notes, filename) {
         }
     }, 3000);
 }
+
+// Initialize with Song Practice mode (load default sequence)
+setTimeout(() => {
+    loadSequence(sequenceSelect.value || 'simple-scale');
+}, 100);
+
+// ============================================
+// Note Selector - Visual Grand Staff Selection
+// ============================================
+
+// Note selector state
+const noteSelectorState = {
+    isOpen: false,
+    mode: 'free', // 'free' or 'song'
+    hoveredNote: null,
+    selectedNote: null, // {note, octave} - pending selection before OK
+    accidental: 'natural', // 'flat', 'natural', or 'sharp'
+    notePositions: [] // Array of {note, octave, x, y, width, height} for hit detection
+};
+
+// Note selector DOM elements
+const noteSelectorPopup = document.getElementById('note-selector-popup');
+const noteSelectorClose = document.getElementById('note-selector-close');
+const noteSelectorLabel = document.getElementById('note-selector-label');
+const noteSelectorOk = document.getElementById('note-selector-ok');
+const accidentalToggle = document.getElementById('accidental-toggle');
+const accidentalBtns = accidentalToggle.querySelectorAll('.accidental-btn');
+const grandStaffCanvas = document.getElementById('grand-staff-canvas');
+const grandStaffCtx = grandStaffCanvas.getContext('2d');
+const freePracticeMiniCanvas = document.getElementById('free-practice-mini-canvas');
+const freePracticeMiniCtx = freePracticeMiniCanvas.getContext('2d');
+const songPracticeMiniCanvas = document.getElementById('song-practice-mini-canvas');
+const songPracticeMiniCtx = songPracticeMiniCanvas.getContext('2d');
+const freePracticeMiniStaff = document.getElementById('free-practice-mini-staff');
+const songPracticeMiniStaff = document.getElementById('song-practice-mini-staff');
+const freeOctaveDown = document.getElementById('free-octave-down');
+const freeOctaveUp = document.getElementById('free-octave-up');
+const songOctaveDown = document.getElementById('song-octave-down');
+const songOctaveUp = document.getElementById('song-octave-up');
+
+// Natural notes only (no sharps/flats)
+const naturalNotes = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
+
+// Generate note range from E2 to G5 (natural notes only)
+function getNoteRange() {
+    const notes = [];
+    // E2 to G5: natural notes only
+    for (let octave = 2; octave <= 5; octave++) {
+        for (const note of naturalNotes) {
+            // Skip notes before E2
+            if (octave === 2 && naturalNotes.indexOf(note) < naturalNotes.indexOf('E')) continue;
+            // Skip notes after G5
+            if (octave === 5 && naturalNotes.indexOf(note) > naturalNotes.indexOf('G')) continue;
+            notes.push({ note, octave });
+        }
+    }
+    return notes;
+}
+
+// Draw a scaled treble clef for mini-staff using SVG path
+function drawTrebleClefMini(ctx, x, staffTop, lineSpacing) {
+    ctx.save();
+    ctx.fillStyle = '#999';
+
+    // Scale based on line spacing (base scale 0.50 for lineSpacing=10)
+    const scale = (lineSpacing / 10) * 0.50;
+    const offsetX = x - 4 * (lineSpacing / 10);
+    // The G-circle in the SVG needs to align with G line (staffTop + 3*lineSpacing)
+    const offsetY = staffTop - 1.75 * lineSpacing;
+
+    ctx.translate(offsetX, offsetY);
+    ctx.scale(scale, scale);
+
+    const path = new Path2D(TREBLE_CLEF_PATH);
+    ctx.fill(path);
+
+    ctx.restore();
+}
+
+// Draw a scaled bass clef for mini-staff using SVG path
+function drawBassClefMini(ctx, x, staffTop, lineSpacing) {
+    ctx.save();
+    ctx.fillStyle = '#999';
+
+    // Scale 0.75 for lineSpacing=10, position to align with F line
+    const scale = (lineSpacing / 10) * 0.75;
+    const offsetX = x + 6 * (lineSpacing / 10);
+    const offsetY = staffTop - 0.3 * lineSpacing;
+
+    ctx.translate(offsetX, offsetY);
+    ctx.scale(scale, scale);
+
+    // Draw main body
+    const path = new Path2D(BASS_CLEF_PATH);
+    ctx.fill(path);
+
+    // Draw two dots (positions from original SVG)
+    ctx.beginPath();
+    ctx.arc(36, 9.5, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(36, 22.6, 5, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+}
+
+// Get display name for a note with accidental
+function getNoteDisplayName(note, octave) {
+    // Handle sharp notation (C# -> C♯4)
+    if (note.includes('#')) {
+        return `${note.replace('#', '♯')}${octave}`;
+    }
+    // Handle flat notation (Db -> D♭4)
+    if (note.includes('b')) {
+        return `${note.replace('b', '♭')}${octave}`;
+    }
+    return `${note}${octave}`;
+}
+
+// Draw mini-staff with a single selected note
+function drawMiniStaff(ctx, canvas, note, octave) {
+    const width = canvas.width;
+    const height = canvas.height;
+
+    // Clear
+    ctx.fillStyle = 'rgba(30, 30, 40, 1)';
+    ctx.fillRect(0, 0, width, height);
+
+    // Compact layout
+    const staffTop = 12;
+    const lineSpacing = 6;
+    const clefWidth = 18;
+    const leftMargin = 3;
+
+    // Determine clef based on note (C4 and above use treble)
+    const staffPos = getStaffPosition(note, octave);
+    const clef = staffPos >= 28 ? 'treble' : 'bass';
+
+    // Draw staff lines
+    ctx.strokeStyle = '#555';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 5; i++) {
+        const y = staffTop + i * lineSpacing;
+        ctx.beginPath();
+        ctx.moveTo(leftMargin, y);
+        ctx.lineTo(width - 3, y);
+        ctx.stroke();
+    }
+
+    // Draw clef
+    if (clef === 'treble') {
+        drawTrebleClefMini(ctx, leftMargin, staffTop, lineSpacing);
+    } else {
+        drawBassClefMini(ctx, leftMargin, staffTop, lineSpacing);
+    }
+
+    // Note position - close to clef with small gap
+    const noteX = leftMargin + clefWidth + 12;
+    const y = getYForStaffPosition(staffPos, clef, staffTop, lineSpacing);
+    const isSharp = note.includes('#');
+    const isFlat = note.includes('b');
+
+    // Draw ledger lines
+    drawMiniLedgerLines(ctx, noteX, y, staffTop, lineSpacing);
+
+    // Draw note head (filled)
+    ctx.fillStyle = '#4ecdc4';
+    ctx.beginPath();
+    ctx.ellipse(noteX, y, 4, 3, -0.3, 0, 2 * Math.PI);
+    ctx.fill();
+
+    // Draw accidental if needed
+    if (isSharp) {
+        ctx.fillStyle = '#4ecdc4';
+        ctx.font = 'bold 9px serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('\u266F', noteX - 8, y);
+    } else if (isFlat) {
+        ctx.fillStyle = '#4ecdc4';
+        ctx.font = 'bold 10px serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('\u266D', noteX - 8, y);
+    }
+
+    // Draw note name below staff (centered under note)
+    ctx.fillStyle = '#888';
+    ctx.font = '8px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillText(getNoteDisplayName(note, octave), noteX, height - 9);
+}
+
+// Draw ledger lines for mini-staff
+function drawMiniLedgerLines(ctx, x, y, staffTop, lineSpacing) {
+    ctx.save();
+    ctx.strokeStyle = '#666';
+    ctx.lineWidth = 1;
+
+    const bottomLine = staffTop + 4 * lineSpacing;
+    const topLine = staffTop;
+
+    if (y > bottomLine + lineSpacing / 2) {
+        for (let ly = bottomLine + lineSpacing; ly <= y + lineSpacing / 2; ly += lineSpacing) {
+            ctx.beginPath();
+            ctx.moveTo(x - 6, ly);
+            ctx.lineTo(x + 6, ly);
+            ctx.stroke();
+        }
+    }
+
+    if (y < topLine - lineSpacing / 2) {
+        for (let ly = topLine - lineSpacing; ly >= y - lineSpacing / 2; ly -= lineSpacing) {
+            ctx.beginPath();
+            ctx.moveTo(x - 6, ly);
+            ctx.lineTo(x + 6, ly);
+            ctx.stroke();
+        }
+    }
+
+    ctx.restore();
+}
+
+// Draw a selectable note on grand staff (hollow whole note with hover state)
+function drawSelectableNote(ctx, x, y, isHovered, isSelected) {
+    ctx.save();
+
+    // Determine color
+    let noteColor;
+    if (isSelected) {
+        noteColor = '#4ecdc4';
+    } else if (isHovered) {
+        noteColor = '#6bcb77';
+    } else {
+        noteColor = '#bbb';
+    }
+    ctx.strokeStyle = noteColor;
+    ctx.fillStyle = noteColor;
+
+    // Note head (hollow whole note style)
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(x, y, 7, 5, 0, 0, 2 * Math.PI);
+    if (isSelected || isHovered) {
+        ctx.fill();
+    } else {
+        ctx.stroke();
+    }
+
+    ctx.restore();
+}
+
+// Draw grand staff selector with all notes from E2 to G5
+function drawGrandStaffSelector() {
+    const canvas = grandStaffCanvas;
+    const ctx = grandStaffCtx;
+    const width = canvas.width;
+    const height = canvas.height;
+
+    // Clear
+    ctx.fillStyle = 'rgba(30, 30, 40, 1)';
+    ctx.fillRect(0, 0, width, height);
+
+    // Layout - stacked: treble notes on treble staff, bass notes on bass staff
+    const trebleStaffTop = 15;
+    const bassStaffTop = 115;
+    const lineSpacing = 10;
+    const leftMargin = 5;
+    const clefWidth = 45;
+
+    // Split notes into treble (C4+) and bass (below C4)
+    const noteRange = getNoteRange();
+    const trebleNotes = noteRange.filter(n => getStaffPosition(n.note, n.octave) >= 28);
+    const bassNotes = noteRange.filter(n => getStaffPosition(n.note, n.octave) < 28);
+
+    // Calculate spacing for each staff
+    const trebleNoteSpacing = (width - clefWidth - 15) / trebleNotes.length;
+    const bassNoteSpacing = (width - clefWidth - 15) / bassNotes.length;
+
+    // Draw treble staff
+    ctx.strokeStyle = '#555';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 5; i++) {
+        const y = trebleStaffTop + i * lineSpacing;
+        ctx.beginPath();
+        ctx.moveTo(leftMargin, y);
+        ctx.lineTo(width - 5, y);
+        ctx.stroke();
+    }
+
+    // Draw bass staff
+    for (let i = 0; i < 5; i++) {
+        const y = bassStaffTop + i * lineSpacing;
+        ctx.beginPath();
+        ctx.moveTo(leftMargin, y);
+        ctx.lineTo(width - 5, y);
+        ctx.stroke();
+    }
+
+    // Draw clefs
+    drawTrebleClef(ctx, leftMargin, trebleStaffTop, lineSpacing);
+    drawBassClef(ctx, leftMargin, bassStaffTop, lineSpacing);
+
+    // Clear note positions for hit detection
+    noteSelectorState.notePositions = [];
+
+    // Draw treble notes (C4 to G5)
+    trebleNotes.forEach((noteInfo, i) => {
+        const x = clefWidth + i * trebleNoteSpacing + trebleNoteSpacing / 2;
+        const staffPos = getStaffPosition(noteInfo.note, noteInfo.octave);
+        const y = getYForStaffPosition(staffPos, 'treble', trebleStaffTop, lineSpacing);
+
+        const isHovered = noteSelectorState.hoveredNote &&
+            noteSelectorState.hoveredNote.note === noteInfo.note &&
+            noteSelectorState.hoveredNote.octave === noteInfo.octave;
+        const isSelected = noteSelectorState.selectedNote &&
+            noteSelectorState.selectedNote.note === noteInfo.note &&
+            noteSelectorState.selectedNote.octave === noteInfo.octave;
+
+        // Draw ledger lines
+        drawGrandStaffLedgerLines(ctx, x, y, trebleStaffTop, lineSpacing);
+
+        // Draw the note
+        drawSelectableNote(ctx, x, y, isHovered, isSelected);
+
+        // Store position for hit detection
+        noteSelectorState.notePositions.push({
+            note: noteInfo.note,
+            octave: noteInfo.octave,
+            x: x - 10,
+            y: y - 10,
+            width: 20,
+            height: 20
+        });
+    });
+
+    // Draw bass notes (E2 to B3)
+    bassNotes.forEach((noteInfo, i) => {
+        const x = clefWidth + i * bassNoteSpacing + bassNoteSpacing / 2;
+        const staffPos = getStaffPosition(noteInfo.note, noteInfo.octave);
+        const y = getYForStaffPosition(staffPos, 'bass', bassStaffTop, lineSpacing);
+
+        const isHovered = noteSelectorState.hoveredNote &&
+            noteSelectorState.hoveredNote.note === noteInfo.note &&
+            noteSelectorState.hoveredNote.octave === noteInfo.octave;
+        const isSelected = noteSelectorState.selectedNote &&
+            noteSelectorState.selectedNote.note === noteInfo.note &&
+            noteSelectorState.selectedNote.octave === noteInfo.octave;
+
+        // Draw ledger lines
+        drawGrandStaffLedgerLines(ctx, x, y, bassStaffTop, lineSpacing);
+
+        // Draw the note
+        drawSelectableNote(ctx, x, y, isHovered, isSelected);
+
+        // Store position for hit detection
+        noteSelectorState.notePositions.push({
+            note: noteInfo.note,
+            octave: noteInfo.octave,
+            x: x - 10,
+            y: y - 10,
+            width: 20,
+            height: 20
+        });
+    });
+}
+
+// Draw ledger lines for grand staff (handles middle C area)
+function drawGrandStaffLedgerLines(ctx, x, y, staffTop, lineSpacing) {
+    ctx.save();
+    ctx.strokeStyle = '#666';
+    ctx.lineWidth = 1;
+
+    const bottomLine = staffTop + 4 * lineSpacing;
+    const topLine = staffTop;
+
+    // Below staff
+    if (y > bottomLine + lineSpacing / 2) {
+        for (let ly = bottomLine + lineSpacing; ly <= y + lineSpacing / 2; ly += lineSpacing) {
+            ctx.beginPath();
+            ctx.moveTo(x - 10, ly);
+            ctx.lineTo(x + 10, ly);
+            ctx.stroke();
+        }
+    }
+
+    // Above staff
+    if (y < topLine - lineSpacing / 2) {
+        for (let ly = topLine - lineSpacing; ly >= y - lineSpacing / 2; ly -= lineSpacing) {
+            ctx.beginPath();
+            ctx.moveTo(x - 10, ly);
+            ctx.lineTo(x + 10, ly);
+            ctx.stroke();
+        }
+    }
+
+    ctx.restore();
+}
+
+// Get note at canvas position (hit detection)
+function getNoteAtPosition(x, y) {
+    for (const pos of noteSelectorState.notePositions) {
+        if (x >= pos.x && x <= pos.x + pos.width &&
+            y >= pos.y && y <= pos.y + pos.height) {
+            return { note: pos.note, octave: pos.octave };
+        }
+    }
+    return null;
+}
+
+// Get the base note from a note that may have accidentals
+function getBaseNote(note) {
+    return note.replace('#', '').replace('b', '');
+}
+
+// Get the accidental from a note string
+function getAccidentalFromNote(note) {
+    if (note.includes('#')) return 'sharp';
+    if (note.includes('b')) return 'flat';
+    return 'natural';
+}
+
+// Apply accidental to a base note
+function applyAccidental(baseNote, accidental) {
+    if (accidental === 'sharp') return baseNote + '#';
+    if (accidental === 'flat') return baseNote + 'b';
+    return baseNote;
+}
+
+// Convert flat notes to their enharmonic sharp equivalents for dropdown compatibility
+// Returns { note, octave } with adjusted octave if needed (e.g., Cb -> B of lower octave)
+function flatToSharpEquivalent(note, octave) {
+    if (!note.includes('b')) return { note, octave };
+
+    const baseNote = note.replace('b', '');
+    const flatToSharp = {
+        'D': { note: 'C#', octaveAdjust: 0 },
+        'E': { note: 'D#', octaveAdjust: 0 },
+        'G': { note: 'F#', octaveAdjust: 0 },
+        'A': { note: 'G#', octaveAdjust: 0 },
+        'B': { note: 'A#', octaveAdjust: 0 },
+        'C': { note: 'B', octaveAdjust: -1 },  // Cb -> B of lower octave
+        'F': { note: 'E', octaveAdjust: 0 }    // Fb -> E (rare but handle it)
+    };
+
+    const equiv = flatToSharp[baseNote];
+    if (equiv) {
+        return { note: equiv.note, octave: octave + equiv.octaveAdjust };
+    }
+    return { note, octave };
+}
+
+// Update the accidental toggle UI
+function updateAccidentalToggle(accidental) {
+    accidentalBtns.forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.accidental === accidental);
+    });
+}
+
+// Update the note selector label
+function updateNoteSelectorLabel() {
+    if (noteSelectorState.selectedNote) {
+        const { note, octave } = noteSelectorState.selectedNote;
+        const finalNote = applyAccidental(note, noteSelectorState.accidental);
+        noteSelectorLabel.textContent = getNoteDisplayName(finalNote, octave);
+        noteSelectorLabel.classList.add('note-selected');
+        noteSelectorOk.disabled = false;
+    } else {
+        noteSelectorLabel.textContent = 'Select a note';
+        noteSelectorLabel.classList.remove('note-selected');
+        noteSelectorOk.disabled = true;
+    }
+}
+
+// Open note selector popup
+function openNoteSelector(mode) {
+    noteSelectorState.mode = mode;
+    noteSelectorState.isOpen = true;
+    noteSelectorState.hoveredNote = null;
+
+    // Get current selection and parse it
+    let currentNote, currentOctave;
+    if (mode === 'free') {
+        currentNote = noteSelect.value;
+        currentOctave = parseInt(octaveSelect.value);
+    } else {
+        currentNote = startNoteSelect.value;
+        currentOctave = parseInt(startOctaveSelect.value);
+    }
+
+    // Set initial state from current selection
+    const baseNote = getBaseNote(currentNote);
+    const accidental = getAccidentalFromNote(currentNote);
+    noteSelectorState.selectedNote = { note: baseNote, octave: currentOctave };
+    noteSelectorState.accidental = accidental;
+
+    // Update UI
+    updateAccidentalToggle(accidental);
+    updateNoteSelectorLabel();
+    noteSelectorPopup.classList.add('active');
+    drawGrandStaffSelector();
+}
+
+// Close note selector popup
+function closeNoteSelector() {
+    noteSelectorState.isOpen = false;
+    noteSelectorState.hoveredNote = null;
+    noteSelectorState.selectedNote = null;
+    noteSelectorPopup.classList.remove('active');
+}
+
+// Handle clicking a note on the grand staff (sets pending selection)
+function handleNoteClick(note, octave) {
+    noteSelectorState.selectedNote = { note, octave };
+    updateNoteSelectorLabel();
+    drawGrandStaffSelector();
+}
+
+// Confirm selection and apply to appropriate mode
+function confirmNoteSelection() {
+    if (!noteSelectorState.selectedNote) return;
+
+    const { note, octave } = noteSelectorState.selectedNote;
+    const finalNote = applyAccidental(note, noteSelectorState.accidental);
+
+    // Convert flats to sharp equivalents for dropdown compatibility
+    const { note: dropdownNote, octave: dropdownOctave } = flatToSharpEquivalent(finalNote, octave);
+
+    if (noteSelectorState.mode === 'free') {
+        noteSelect.value = dropdownNote;
+        octaveSelect.value = dropdownOctave.toString();
+        updateCurrentNote();
+        // Mini-staff will be redrawn by updateCurrentNote
+    } else {
+        startNoteSelect.value = dropdownNote;
+        startOctaveSelect.value = dropdownOctave.toString();
+        loadSequence(sequenceSelect.value);
+        // Mini-staff will be redrawn by loadSequence -> updateSongPracticeMiniStaff
+    }
+    closeNoteSelector();
+}
+
+// Initialize note selector event listeners
+function initNoteSelector() {
+    // Mini-staff click handlers
+    freePracticeMiniStaff.addEventListener('click', () => {
+        openNoteSelector('free');
+    });
+
+    songPracticeMiniStaff.addEventListener('click', () => {
+        openNoteSelector('song');
+    });
+
+    // Close button
+    noteSelectorClose.addEventListener('click', closeNoteSelector);
+
+    // OK button
+    noteSelectorOk.addEventListener('click', confirmNoteSelection);
+
+    // Accidental toggle buttons
+    accidentalBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            noteSelectorState.accidental = btn.dataset.accidental;
+            updateAccidentalToggle(noteSelectorState.accidental);
+            updateNoteSelectorLabel();
+        });
+    });
+
+    // Click outside to close
+    noteSelectorPopup.addEventListener('click', (e) => {
+        if (e.target === noteSelectorPopup) {
+            closeNoteSelector();
+        }
+    });
+
+    // Grand staff mouse/touch events
+    grandStaffCanvas.addEventListener('mousemove', (e) => {
+        const rect = grandStaffCanvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const noteInfo = getNoteAtPosition(x, y);
+
+        if (noteInfo) {
+            noteSelectorState.hoveredNote = noteInfo;
+        } else {
+            noteSelectorState.hoveredNote = null;
+        }
+        drawGrandStaffSelector();
+    });
+
+    grandStaffCanvas.addEventListener('mouseleave', () => {
+        noteSelectorState.hoveredNote = null;
+        drawGrandStaffSelector();
+    });
+
+    grandStaffCanvas.addEventListener('click', (e) => {
+        const rect = grandStaffCanvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const noteInfo = getNoteAtPosition(x, y);
+
+        if (noteInfo) {
+            handleNoteClick(noteInfo.note, noteInfo.octave);
+        }
+    });
+
+    // Touch support for mobile
+    grandStaffCanvas.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        const touch = e.touches[0];
+        const rect = grandStaffCanvas.getBoundingClientRect();
+        const x = touch.clientX - rect.left;
+        const y = touch.clientY - rect.top;
+        const noteInfo = getNoteAtPosition(x, y);
+
+        if (noteInfo) {
+            noteSelectorState.hoveredNote = noteInfo;
+            drawGrandStaffSelector();
+        }
+    });
+
+    grandStaffCanvas.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        if (noteSelectorState.hoveredNote) {
+            handleNoteClick(noteSelectorState.hoveredNote.note, noteSelectorState.hoveredNote.octave);
+            noteSelectorState.hoveredNote = null;
+        }
+    });
+
+    // Keyboard support (Escape to close, Enter to confirm)
+    document.addEventListener('keydown', (e) => {
+        if (!noteSelectorState.isOpen) return;
+        if (e.key === 'Escape') {
+            closeNoteSelector();
+        } else if (e.key === 'Enter' && noteSelectorState.selectedNote) {
+            confirmNoteSelection();
+        }
+    });
+
+    // Octave button handlers
+    freeOctaveDown.addEventListener('click', () => shiftFreeOctave(-1));
+    freeOctaveUp.addEventListener('click', () => shiftFreeOctave(1));
+    songOctaveDown.addEventListener('click', () => shiftSongOctave(-1));
+    songOctaveUp.addEventListener('click', () => shiftSongOctave(1));
+
+    // Initialize mini-staffs with current selections
+    const freeNote = noteSelect.value;
+    const freeOctave = parseInt(octaveSelect.value);
+    drawMiniStaff(freePracticeMiniCtx, freePracticeMiniCanvas, freeNote, freeOctave);
+
+    const songNote = startNoteSelect.value;
+    const songOctave = parseInt(startOctaveSelect.value);
+    drawMiniStaff(songPracticeMiniCtx, songPracticeMiniCanvas, songNote, songOctave);
+
+    // Initialize octave button states
+    updateOctaveButtonStates();
+}
+
+// Sync mini-staff when note changes via original dropdowns (if ever used)
+const originalUpdateCurrentNote = updateCurrentNote;
+updateCurrentNote = function() {
+    originalUpdateCurrentNote();
+    const note = noteSelect.value;
+    const octave = parseInt(octaveSelect.value);
+    drawMiniStaff(freePracticeMiniCtx, freePracticeMiniCanvas, note, octave);
+    updateOctaveButtonStates();
+};
+
+// Helper function to update song practice mini-staff (called from loadSequence)
+function updateSongPracticeMiniStaff() {
+    const songNote = startNoteSelect.value;
+    const songOctave = parseInt(startOctaveSelect.value);
+    drawMiniStaff(songPracticeMiniCtx, songPracticeMiniCanvas, songNote, songOctave);
+    updateOctaveButtonStates();
+}
+
+// Check if a note/octave is within the valid range (E2 to G5)
+function isNoteInRange(note, octave) {
+    const baseNote = getBaseNote(note);
+    const staffPos = getStaffPosition(baseNote, octave);
+    const minPos = getStaffPosition('E', 2); // E2
+    const maxPos = getStaffPosition('G', 5); // G5
+    return staffPos >= minPos && staffPos <= maxPos;
+}
+
+// Update octave button disabled states
+function updateOctaveButtonStates() {
+    // Free practice mode
+    const freeNote = noteSelect.value;
+    const freeOctave = parseInt(octaveSelect.value);
+    freeOctaveDown.disabled = !isNoteInRange(freeNote, freeOctave - 1);
+    freeOctaveUp.disabled = !isNoteInRange(freeNote, freeOctave + 1);
+
+    // Song practice mode
+    const songNote = startNoteSelect.value;
+    const songOctave = parseInt(startOctaveSelect.value);
+    songOctaveDown.disabled = !isNoteInRange(songNote, songOctave - 1);
+    songOctaveUp.disabled = !isNoteInRange(songNote, songOctave + 1);
+}
+
+// Shift octave for free practice
+function shiftFreeOctave(direction) {
+    const currentOctave = parseInt(octaveSelect.value);
+    const newOctave = currentOctave + direction;
+    if (isNoteInRange(noteSelect.value, newOctave)) {
+        octaveSelect.value = newOctave.toString();
+        updateCurrentNote();
+    }
+}
+
+// Shift octave for song practice
+function shiftSongOctave(direction) {
+    const currentOctave = parseInt(startOctaveSelect.value);
+    const newOctave = currentOctave + direction;
+    if (isNoteInRange(startNoteSelect.value, newOctave)) {
+        startOctaveSelect.value = newOctave.toString();
+        loadSequence(sequenceSelect.value);
+    }
+}
+
+// Initialize note selector on page load
+initNoteSelector();

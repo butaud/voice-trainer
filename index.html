@@ -11,13 +11,13 @@
         <h1>Voice Trainer</h1>
 
         <div class="mode-toggle">
-            <button id="mode-free" class="mode-btn active">Free Practice</button>
-            <button id="mode-sequence" class="mode-btn">Sequence Mode</button>
+            <button id="mode-sequence" class="mode-btn active">Song Practice</button>
+            <button id="mode-free" class="mode-btn">Free Practice</button>
         </div>
 
-        <section class="note-section free-practice-section">
+        <section class="note-section free-practice-section" style="display: none;">
             <h2>Reference Note</h2>
-            <div class="pitch-selector">
+            <div class="pitch-selector" style="display: none;">
                 <select id="note-select">
                     <option value="C">C</option>
                     <option value="C#">C#</option>
@@ -39,6 +39,15 @@
                     <option value="5">5</option>
                 </select>
             </div>
+            <div class="note-selector-row">
+                <div class="mini-staff-container" id="free-practice-mini-staff">
+                    <canvas id="free-practice-mini-canvas" width="50" height="55"></canvas>
+                </div>
+                <div class="octave-btn-stack">
+                    <button class="octave-btn" id="free-octave-up">+8ve</button>
+                    <button class="octave-btn" id="free-octave-down">-8ve</button>
+                </div>
+            </div>
             <div class="note-display">
                 <span id="note-name">A4</span>
                 <span id="note-freq">440 Hz</span>
@@ -46,7 +55,7 @@
             <button id="play-note" class="btn btn-primary">Play Note</button>
         </section>
 
-        <section class="visualizer-section free-practice-section">
+        <section class="visualizer-section free-practice-section" style="display: none;">
             <h2>Live Pitch</h2>
             <div class="pitch-display">
                 <span id="detected-pitch">--</span>
@@ -68,8 +77,8 @@
             <div id="status" class="status"></div>
         </section>
 
-        <section class="sequence-section" style="display: none;">
-            <h2>Sequence Challenge</h2>
+        <section class="sequence-section">
+            <h2>Song Practice</h2>
             <div class="sequence-selector">
                 <select id="sequence-select">
                     <option value="simple-scale">Simple Scale - Beginner</option>
@@ -92,36 +101,39 @@
             </div>
             <div id="starting-note-container" class="starting-note-selector">
                 <label>Starting note:</label>
-                <select id="start-note-select">
-                    <option value="C">C</option>
-                    <option value="C#">C#</option>
-                    <option value="D">D</option>
-                    <option value="D#">D#</option>
-                    <option value="E">E</option>
-                    <option value="F">F</option>
-                    <option value="F#">F#</option>
-                    <option value="G">G</option>
-                    <option value="G#">G#</option>
-                    <option value="A">A</option>
-                    <option value="A#">A#</option>
-                    <option value="B">B</option>
-                </select>
-                <select id="start-octave-select">
-                    <option value="2">2</option>
-                    <option value="3" selected>3</option>
-                    <option value="4">4</option>
-                    <option value="5">5</option>
-                </select>
-            </div>
-            <div class="sequence-options">
-                <div class="option-group">
-                    <label>Octave:</label>
-                    <div class="octave-shift-controls">
-                        <button id="octave-down-btn" class="shift-btn">−1</button>
-                        <span id="octave-shift-display">0</span>
-                        <button id="octave-up-btn" class="shift-btn">+1</button>
+                <div class="starting-note-hidden-selects" style="display: none;">
+                    <select id="start-note-select">
+                        <option value="C">C</option>
+                        <option value="C#">C#</option>
+                        <option value="D">D</option>
+                        <option value="D#">D#</option>
+                        <option value="E">E</option>
+                        <option value="F">F</option>
+                        <option value="F#">F#</option>
+                        <option value="G">G</option>
+                        <option value="G#">G#</option>
+                        <option value="A">A</option>
+                        <option value="A#">A#</option>
+                        <option value="B">B</option>
+                    </select>
+                    <select id="start-octave-select">
+                        <option value="2">2</option>
+                        <option value="3" selected>3</option>
+                        <option value="4">4</option>
+                        <option value="5">5</option>
+                    </select>
+                </div>
+                <div class="note-selector-row">
+                    <div class="mini-staff-container" id="song-practice-mini-staff">
+                        <canvas id="song-practice-mini-canvas" width="50" height="55"></canvas>
+                    </div>
+                    <div class="octave-btn-stack">
+                        <button class="octave-btn" id="song-octave-up">+8ve</button>
+                        <button class="octave-btn" id="song-octave-down">-8ve</button>
                     </div>
                 </div>
+            </div>
+            <div class="sequence-options">
                 <div class="option-group">
                     <label>Tempo:</label>
                     <div class="tempo-controls">
@@ -150,6 +162,28 @@
             </div>
             <div id="sequence-status" class="status"></div>
         </section>
+    </div>
+
+    <!-- Note Selector Popup -->
+    <div id="note-selector-popup" class="note-selector-popup">
+        <div class="note-selector-content">
+            <div class="note-selector-header">
+                <span>Select Note</span>
+                <button id="note-selector-close" class="note-selector-close">&times;</button>
+            </div>
+            <canvas id="grand-staff-canvas" width="320" height="200"></canvas>
+            <div class="note-selector-footer">
+                <div class="note-selector-controls">
+                    <span id="note-selector-label">Select a note</span>
+                    <div class="accidental-toggle" id="accidental-toggle">
+                        <button class="accidental-btn" data-accidental="flat">&#9837;</button>
+                        <button class="accidental-btn active" data-accidental="natural">&#9838;</button>
+                        <button class="accidental-btn" data-accidental="sharp">&#9839;</button>
+                    </div>
+                </div>
+                <button id="note-selector-ok" class="btn btn-primary note-selector-ok" disabled>OK</button>
+            </div>
+        </div>
     </div>
 
     <script src="app.js"></script>

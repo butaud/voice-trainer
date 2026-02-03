@@ -64,8 +64,8 @@ const sequences = {
     }
 };
 
-// MusicXML Parser
-function parseMusicXML(xmlString) {
+// MusicXML Parser - Get list of parts from a MusicXML document
+function getMusicXMLParts(xmlString) {
     const parser = new DOMParser();
     const doc = parser.parseFromString(xmlString, 'text/xml');
 
@@ -75,10 +75,41 @@ function parseMusicXML(xmlString) {
         throw new Error('Invalid MusicXML file');
     }
 
-    // Get the first part (part-wise MusicXML)
-    const part = doc.querySelector('part');
-    if (!part) {
+    // Get part list with names
+    const parts = [];
+    const partListEl = doc.querySelector('part-list');
+    if (partListEl) {
+        const scoreParts = partListEl.querySelectorAll('score-part');
+        scoreParts.forEach(sp => {
+            const id = sp.getAttribute('id');
+            const nameEl = sp.querySelector('part-name');
+            const name = nameEl ? nameEl.textContent.trim() : id;
+            parts.push({ id, name });
+        });
+    }
+
+    // Fallback: get parts directly if no part-list
+    if (parts.length === 0) {
+        const partEls = doc.querySelectorAll('part');
+        partEls.forEach((p, i) => {
+            const id = p.getAttribute('id') || `part-${i + 1}`;
+            parts.push({ id, name: `Part ${i + 1}` });
+        });
+    }
+
+    if (parts.length === 0) {
         throw new Error('No parts found in MusicXML');
+    }
+
+    return { doc, parts };
+}
+
+// MusicXML Parser - Parse notes from a specific part
+function parseMusicXMLPart(doc, partId) {
+    // Get the specified part
+    const part = doc.querySelector(`part[id="${partId}"]`);
+    if (!part) {
+        throw new Error(`Part "${partId}" not found`);
     }
 
     // Get tempo (default to 120 BPM if not specified)
@@ -162,7 +193,7 @@ function parseMusicXML(xmlString) {
     });
 
     if (notes.length === 0) {
-        throw new Error('No notes found in MusicXML');
+        throw new Error('No notes found in selected part');
     }
 
     return notes;
@@ -669,6 +700,8 @@ const sequenceStatus = document.getElementById('sequence-status');
 const musicxmlImport = document.getElementById('musicxml-import');
 const musicxmlFile = document.getElementById('musicxml-file');
 const musicxmlFilename = document.getElementById('musicxml-filename');
+const musicxmlPartSelector = document.getElementById('musicxml-part-selector');
+const musicxmlPartSelect = document.getElementById('musicxml-part-select');
 const startingNoteContainer = document.getElementById('starting-note-container');
 const octaveDownBtn = document.getElementById('octave-down-btn');
 const octaveUpBtn = document.getElementById('octave-up-btn');
@@ -1820,32 +1853,73 @@ retryBtn.addEventListener('click', () => {
 });
 
 // MusicXML file import handler
+// Store parsed MusicXML document for part selection
+let currentMusicXMLDoc = null;
+let currentMusicXMLFilename = '';
+
 musicxmlFile.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
     musicxmlFilename.textContent = file.name;
+    currentMusicXMLFilename = file.name;
     sequenceStatus.textContent = 'Loading...';
+    musicxmlPartSelector.style.display = 'none';
 
     try {
         const text = await file.text();
-        const notes = parseMusicXML(text);
+        const { doc, parts } = getMusicXMLParts(text);
+        currentMusicXMLDoc = doc;
 
-        // Store in custom sequence
-        sequences['custom'].notes = notes;
+        if (parts.length === 1) {
+            // Single part - load directly
+            const notes = parseMusicXMLPart(doc, parts[0].id);
+            loadCustomSequence(notes, file.name);
+        } else {
+            // Multiple parts - show selector and auto-load first part
+            musicxmlPartSelect.innerHTML = parts.map(p =>
+                `<option value="${p.id}">${p.name}</option>`
+            ).join('');
+            musicxmlPartSelector.style.display = '';
 
-        // Load the custom sequence
-        loadSequence('custom');
-
-        sequenceStatus.textContent = `Loaded ${notes.length} notes from ${file.name}`;
-        setTimeout(() => {
-            if (sequenceStatus.textContent.startsWith('Loaded')) {
-                sequenceStatus.textContent = '';
-            }
-        }, 3000);
+            // Auto-load the first part
+            const notes = parseMusicXMLPart(doc, parts[0].id);
+            loadCustomSequence(notes, file.name);
+        }
     } catch (err) {
         console.error('MusicXML parse error:', err);
         sequenceStatus.textContent = `Error: ${err.message}`;
         musicxmlFilename.textContent = '';
+        currentMusicXMLDoc = null;
     }
 });
+
+// Handle part selection
+musicxmlPartSelect.addEventListener('change', () => {
+    if (!currentMusicXMLDoc) return;
+
+    const partId = musicxmlPartSelect.value;
+    try {
+        const notes = parseMusicXMLPart(currentMusicXMLDoc, partId);
+        loadCustomSequence(notes, currentMusicXMLFilename);
+    } catch (err) {
+        console.error('MusicXML parse error:', err);
+        sequenceStatus.textContent = `Error: ${err.message}`;
+    }
+});
+
+// Helper to load custom sequence
+function loadCustomSequence(notes, filename) {
+    sequences['custom'].notes = notes;
+    loadSequence('custom');
+
+    const partName = musicxmlPartSelector.style.display !== 'none'
+        ? ` (${musicxmlPartSelect.options[musicxmlPartSelect.selectedIndex].text})`
+        : '';
+    sequenceStatus.textContent = `Loaded ${notes.length} notes from ${filename}${partName}`;
+    setTimeout(() => {
+        if (sequenceStatus.textContent.startsWith('Loaded')) {
+            sequenceStatus.textContent = '';
+        }
+    }, 3000);
+}

@@ -497,11 +497,69 @@ section {
 }
 
 #tempo-display {
-    min-width: 45px;
-    text-align: center;
+    min-width: 28px;
+    text-align: right;
     font-weight: bold;
     color: #4ecdc4;
     font-size: 0.9rem;
+}
+
+.bpm-label {
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 0.8rem;
+}
+
+.beat-indicator {
+    display: inline-flex;
+    align-items: flex-end;
+    margin-left: 8px;
+    height: 24px;
+    position: relative;
+}
+
+.beat-indicator .note-head {
+    width: 10px;
+    height: 8px;
+    border-radius: 50%;
+    background: rgba(78, 205, 196, 0.5);
+    transform: rotate(-20deg);
+    transition: background 0.05s ease-out, transform 0.1s ease-out;
+}
+
+.beat-indicator .note-stem {
+    width: 2px;
+    height: 16px;
+    background: rgba(78, 205, 196, 0.5);
+    position: absolute;
+    right: 0;
+    bottom: 3px;
+    transition: background 0.05s ease-out;
+}
+
+.beat-indicator .note-dot {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: rgba(78, 205, 196, 0.5);
+    position: absolute;
+    right: -7px;
+    bottom: 2px;
+    display: none;
+    transition: background 0.05s ease-out;
+}
+
+.beat-indicator.dotted .note-dot {
+    display: block;
+}
+
+.beat-indicator.pulse .note-head {
+    background: #4ecdc4;
+    transform: rotate(-20deg) scale(1.2);
+}
+
+.beat-indicator.pulse .note-stem,
+.beat-indicator.pulse .note-dot {
+    background: #4ecdc4;
 }
 
 .sequence-selector select {

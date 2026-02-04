@@ -18,98 +18,99 @@ const NOTE_TYPES = {
     EIGHTH: 'eighth'
 };
 
-// Predefined sequences (durations in ms at 100% tempo)
+// Predefined sequences (durations in ms at 90 BPM reference tempo)
+// Quarter note = 667ms, Eighth note = 333ms at 90 BPM
 const sequences = {
     'simple-scale': {
         name: 'Simple Scale (C-E)',
         notes: [
-            { note: 'C', octave: 3, duration: 1050, noteType: NOTE_TYPES.QUARTER },
-            { note: 'D', octave: 3, duration: 1050, noteType: NOTE_TYPES.QUARTER },
-            { note: 'E', octave: 3, duration: 1050, noteType: NOTE_TYPES.QUARTER }
+            { note: 'C', octave: 3, duration: 667, noteType: NOTE_TYPES.QUARTER },
+            { note: 'D', octave: 3, duration: 667, noteType: NOTE_TYPES.QUARTER },
+            { note: 'E', octave: 3, duration: 667, noteType: NOTE_TYPES.QUARTER }
         ]
     },
     'octave-jump': {
         name: 'Octave Jump',
         notes: [
-            { note: 'C', octave: 3, duration: 860, noteType: NOTE_TYPES.QUARTER },
-            { note: 'C', octave: 4, duration: 860, noteType: NOTE_TYPES.QUARTER },
-            { note: 'C', octave: 3, duration: 860, noteType: NOTE_TYPES.QUARTER }
+            { note: 'C', octave: 3, duration: 667, noteType: NOTE_TYPES.QUARTER },
+            { note: 'C', octave: 4, duration: 667, noteType: NOTE_TYPES.QUARTER },
+            { note: 'C', octave: 3, duration: 667, noteType: NOTE_TYPES.QUARTER }
         ]
     },
     'major-arpeggio': {
         name: 'Major Arpeggio',
         notes: [
-            { note: 'C', octave: 3, duration: 690, noteType: NOTE_TYPES.QUARTER },
-            { note: 'E', octave: 3, duration: 690, noteType: NOTE_TYPES.QUARTER },
-            { note: 'G', octave: 3, duration: 690, noteType: NOTE_TYPES.QUARTER },
-            { note: 'C', octave: 4, duration: 690, noteType: NOTE_TYPES.QUARTER }
+            { note: 'C', octave: 3, duration: 667, noteType: NOTE_TYPES.QUARTER },
+            { note: 'E', octave: 3, duration: 667, noteType: NOTE_TYPES.QUARTER },
+            { note: 'G', octave: 3, duration: 667, noteType: NOTE_TYPES.QUARTER },
+            { note: 'C', octave: 4, duration: 667, noteType: NOTE_TYPES.QUARTER }
         ]
     },
     'full-scale': {
         name: 'Full Scale Up',
         notes: [
-            { note: 'C', octave: 3, duration: 575, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'D', octave: 3, duration: 575, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'E', octave: 3, duration: 575, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'F', octave: 3, duration: 575, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'G', octave: 3, duration: 575, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'A', octave: 3, duration: 575, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'B', octave: 3, duration: 575, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'C', octave: 4, duration: 575, noteType: NOTE_TYPES.EIGHTH }
+            { note: 'C', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'D', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'E', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'F', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'G', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'A', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'B', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'C', octave: 4, duration: 333, noteType: NOTE_TYPES.EIGHTH }
         ]
     },
     'full-scale-up-down': {
         name: 'Full Scale Up & Down',
         notes: [
-            { note: 'C', octave: 3, duration: 500, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'D', octave: 3, duration: 500, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'E', octave: 3, duration: 500, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'F', octave: 3, duration: 500, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'G', octave: 3, duration: 500, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'A', octave: 3, duration: 500, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'B', octave: 3, duration: 500, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'C', octave: 4, duration: 500, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'B', octave: 3, duration: 500, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'A', octave: 3, duration: 500, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'G', octave: 3, duration: 500, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'F', octave: 3, duration: 500, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'E', octave: 3, duration: 500, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'D', octave: 3, duration: 500, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'C', octave: 3, duration: 500, noteType: NOTE_TYPES.EIGHTH }
+            { note: 'C', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'D', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'E', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'F', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'G', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'A', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'B', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'C', octave: 4, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'B', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'A', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'G', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'F', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'E', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'D', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'C', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH }
         ]
     },
     'double-scale': {
         name: 'Double Scale (Up & Down x2)',
         notes: [
-            { note: 'C', octave: 3, duration: 400, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'D', octave: 3, duration: 400, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'E', octave: 3, duration: 400, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'F', octave: 3, duration: 400, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'G', octave: 3, duration: 400, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'A', octave: 3, duration: 400, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'B', octave: 3, duration: 400, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'C', octave: 4, duration: 400, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'B', octave: 3, duration: 400, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'A', octave: 3, duration: 400, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'G', octave: 3, duration: 400, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'F', octave: 3, duration: 400, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'E', octave: 3, duration: 400, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'D', octave: 3, duration: 400, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'C', octave: 3, duration: 400, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'D', octave: 3, duration: 400, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'E', octave: 3, duration: 400, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'F', octave: 3, duration: 400, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'G', octave: 3, duration: 400, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'A', octave: 3, duration: 400, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'B', octave: 3, duration: 400, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'C', octave: 4, duration: 400, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'B', octave: 3, duration: 400, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'A', octave: 3, duration: 400, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'G', octave: 3, duration: 400, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'F', octave: 3, duration: 400, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'E', octave: 3, duration: 400, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'D', octave: 3, duration: 400, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'C', octave: 3, duration: 400, noteType: NOTE_TYPES.EIGHTH }
+            { note: 'C', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'D', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'E', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'F', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'G', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'A', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'B', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'C', octave: 4, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'B', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'A', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'G', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'F', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'E', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'D', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'C', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'D', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'E', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'F', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'G', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'A', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'B', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'C', octave: 4, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'B', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'A', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'G', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'F', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'E', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'D', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
+            { note: 'C', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH }
         ]
     },
     'custom': {
@@ -263,7 +264,8 @@ function parseMusicXMLPart(doc, partId) {
 
     return {
         notes: notes,
-        timeSignature: { beats: timeBeats, beatType: timeBeatType }
+        timeSignature: { beats: timeBeats, beatType: timeBeatType },
+        tempo: tempo  // The BPM at which durations were calculated
     };
 }
 
@@ -287,7 +289,9 @@ const sequenceState = {
     sequenceStartTime: 0,      // When the sequence started (after countdown)
     globalPitchTrace: [],      // Array of {time, frequency, noteIndex} for entire sequence
     // Time signature for beat calculation (from MusicXML or default 4/4)
-    timeSignature: { beats: 4, beatType: 4 }
+    timeSignature: { beats: 4, beatType: 4 },
+    // Source tempo - the BPM at which durations were calculated (90 for built-in, from file for MusicXML)
+    sourceTempo: 90
 };
 
 // Preview scroll animation state - uses shared scroll utilities
@@ -960,9 +964,38 @@ const musicxmlPartSelect = document.getElementById('musicxml-part-select');
 const startingNoteContainer = document.getElementById('starting-note-container');
 const tempoSlider = document.getElementById('tempo-slider');
 const tempoDisplay = document.getElementById('tempo-display');
+const beatIndicator = document.getElementById('beat-indicator');
 
 // Sequence configuration state
-let tempoPercent = 100;
+let tempoBPM = 90;
+
+// Beat indicator animation
+let beatIndicatorInterval = null;
+
+function startBeatIndicator() {
+    stopBeatIndicator();
+
+    // BPM now means "beats per minute" where beat depends on time signature
+    // So the interval is simply 60000 / tempoBPM regardless of time signature
+    const beatIntervalMs = 60000 / tempoBPM;
+
+    // Pulse immediately, then on interval
+    pulseBeatIndicator();
+    beatIndicatorInterval = setInterval(pulseBeatIndicator, beatIntervalMs);
+}
+
+function stopBeatIndicator() {
+    if (beatIndicatorInterval) {
+        clearInterval(beatIndicatorInterval);
+        beatIndicatorInterval = null;
+    }
+    beatIndicator.classList.remove('pulse');
+}
+
+function pulseBeatIndicator() {
+    beatIndicator.classList.add('pulse');
+    setTimeout(() => beatIndicator.classList.remove('pulse'), 100);
+}
 
 // Mode toggle
 function setMode(mode) {
@@ -1031,9 +1064,10 @@ function loadSequence(id) {
         };
     });
 
-    // Reset time signature to 4/4 for built-in sequences (not custom, which sets it before calling this)
+    // Reset time signature and source tempo for built-in sequences (not custom, which sets them before calling this)
     if (id !== 'custom') {
         sequenceState.timeSignature = { beats: 4, beatType: 4 };
+        sequenceState.sourceTempo = 90; // Built-in sequences are defined at 90 BPM
     }
 
     // Reset user scroll when sequence changes
@@ -1047,11 +1081,48 @@ function loadSequence(id) {
     if (typeof updateSongPracticeMiniStaff === 'function') {
         updateSongPracticeMiniStaff();
     }
+
+    // Update beat indicator to show dotted note for compound time
+    updateBeatIndicatorStyle();
+}
+
+// Update beat indicator to show quarter or dotted quarter based on time signature
+function updateBeatIndicatorStyle() {
+    const { beats, beatType } = sequenceState.timeSignature;
+    const isCompoundTime = beatType === 8 && (beats === 6 || beats === 9 || beats === 12);
+
+    if (isCompoundTime) {
+        beatIndicator.classList.add('dotted');
+    } else {
+        beatIndicator.classList.remove('dotted');
+    }
 }
 
 // Get tempo-adjusted duration (in ms)
 function getAdjustedDuration(baseDuration) {
-    return baseDuration * (100 / tempoPercent);
+    // Scale duration from source tempo to target tempo
+    // sourceTempo is the BPM at which baseDuration was calculated (always in quarter notes)
+    // tempoBPM is the user's selected playback tempo (in beats, where beat depends on time signature)
+
+    // For compound time (6/8, 9/8, 12/8), the beat is a dotted quarter (1.5 quarter notes)
+    // So tempoBPM in compound time means "dotted quarters per minute"
+    // Convert to quarter notes per minute for the calculation
+    const { beats, beatType } = sequenceState.timeSignature;
+    const isCompoundTime = beatType === 8 && (beats === 6 || beats === 9 || beats === 12);
+
+    let effectiveTempoBPM = tempoBPM;
+    if (isCompoundTime) {
+        // User's BPM is in dotted quarters, convert to quarter notes
+        effectiveTempoBPM = tempoBPM * 1.5;
+    } else if (beatType === 8) {
+        // Simple time with eighth note beat - BPM is in eighths, convert to quarters
+        effectiveTempoBPM = tempoBPM / 2;
+    } else if (beatType === 2) {
+        // Half note beat - BPM is in halves, convert to quarters
+        effectiveTempoBPM = tempoBPM * 2;
+    }
+
+    return baseDuration * (sequenceState.sourceTempo / effectiveTempoBPM);
 }
 
 // Sheet music drawing
@@ -1898,45 +1969,9 @@ function runCountdown() {
 
     const ctx = getAudioContext();
 
-    // Calculate beat interval based on time signature
-    // First, get the quarter note duration from the first note
-    const firstNote = sequenceState.currentSequence[0];
-    const firstNoteDuration = getAdjustedDuration(firstNote.duration);
-    const noteType = firstNote.noteType || NOTE_TYPES.QUARTER;
-
-    // Convert first note duration to quarter note duration
-    let quarterNoteDuration;
-    if (noteType === NOTE_TYPES.EIGHTH) {
-        quarterNoteDuration = firstNoteDuration * 2;
-    } else if (noteType === NOTE_TYPES.HALF) {
-        quarterNoteDuration = firstNoteDuration / 2;
-    } else if (noteType === NOTE_TYPES.WHOLE) {
-        quarterNoteDuration = firstNoteDuration / 4;
-    } else {
-        quarterNoteDuration = firstNoteDuration;
-    }
-
-    // Calculate beat duration from time signature
-    const { beats, beatType } = sequenceState.timeSignature;
-
-    // Check if this is compound time (6/8, 9/8, 12/8)
-    // In compound time, we count in dotted quarters (3 eighth notes per beat)
-    const isCompoundTime = beatType === 8 && (beats === 6 || beats === 9 || beats === 12);
-
-    let beatIntervalMs;
-    if (isCompoundTime) {
-        // Compound time: beat = dotted quarter = 1.5 quarter notes
-        beatIntervalMs = quarterNoteDuration * 1.5;
-    } else if (beatType === 8) {
-        // Simple time with eighth note beat (uncommon, but 3/8 etc.)
-        beatIntervalMs = quarterNoteDuration / 2;
-    } else if (beatType === 2) {
-        // Half note beat
-        beatIntervalMs = quarterNoteDuration * 2;
-    } else {
-        // Quarter note beat (most common: 2/4, 3/4, 4/4)
-        beatIntervalMs = quarterNoteDuration;
-    }
+    // Calculate beat interval - since getAdjustedDuration already accounts for time signature,
+    // the beat interval is simply 60000 / tempoBPM (one beat at the user's selected tempo)
+    const beatIntervalMs = 60000 / tempoBPM;
 
     const beatIntervalSec = beatIntervalMs / 1000;
     sequenceState.countdownBeatInterval = beatIntervalMs; // Store for use during playback
@@ -2527,9 +2562,24 @@ startOctaveSelect.addEventListener('change', () => {
 
 // Tempo control
 tempoSlider.addEventListener('input', () => {
-    tempoPercent = parseInt(tempoSlider.value);
-    tempoDisplay.textContent = tempoPercent + '%';
+    tempoBPM = parseInt(tempoSlider.value);
+    tempoDisplay.textContent = tempoBPM;
+    // Restart beat indicator with new tempo
+    if (beatIndicatorInterval) {
+        startBeatIndicator();
+    }
+    // Redraw sheet music (spacing is duration-based)
+    drawSheetMusic();
 });
+
+// Start beat indicator when user interacts with slider
+tempoSlider.addEventListener('mousedown', startBeatIndicator);
+tempoSlider.addEventListener('touchstart', startBeatIndicator);
+
+// Stop beat indicator when user releases slider
+tempoSlider.addEventListener('mouseup', stopBeatIndicator);
+tempoSlider.addEventListener('mouseleave', stopBeatIndicator);
+tempoSlider.addEventListener('touchend', stopBeatIndicator);
 
 previewBtn.addEventListener('click', previewSequence);
 
@@ -2569,7 +2619,7 @@ musicxmlFile.addEventListener('change', async (e) => {
         if (parts.length === 1) {
             // Single part - load directly
             const result = parseMusicXMLPart(doc, parts[0].id);
-            loadCustomSequence(result.notes, file.name, result.timeSignature);
+            loadCustomSequence(result.notes, file.name, result.timeSignature, result.tempo);
         } else {
             // Multiple parts - show selector and auto-load first part
             musicxmlPartSelect.innerHTML = parts.map(p =>
@@ -2579,7 +2629,7 @@ musicxmlFile.addEventListener('change', async (e) => {
 
             // Auto-load the first part
             const result = parseMusicXMLPart(doc, parts[0].id);
-            loadCustomSequence(result.notes, file.name, result.timeSignature);
+            loadCustomSequence(result.notes, file.name, result.timeSignature, result.tempo);
         }
     } catch (err) {
         console.error('MusicXML parse error:', err);
@@ -2596,7 +2646,7 @@ musicxmlPartSelect.addEventListener('change', () => {
     const partId = musicxmlPartSelect.value;
     try {
         const result = parseMusicXMLPart(currentMusicXMLDoc, partId);
-        loadCustomSequence(result.notes, currentMusicXMLFilename, result.timeSignature);
+        loadCustomSequence(result.notes, currentMusicXMLFilename, result.timeSignature, result.tempo);
     } catch (err) {
         console.error('MusicXML parse error:', err);
         sequenceStatus.textContent = `Error: ${err.message}`;
@@ -2604,11 +2654,14 @@ musicxmlPartSelect.addEventListener('change', () => {
 });
 
 // Helper to load custom sequence
-function loadCustomSequence(notes, filename, timeSignature = null) {
+function loadCustomSequence(notes, filename, timeSignature = null, tempo = 120) {
     sequences['custom'].notes = notes;
 
     // Store time signature (default to 4/4 if not provided)
     sequenceState.timeSignature = timeSignature || { beats: 4, beatType: 4 };
+
+    // Store source tempo (the BPM at which durations were calculated)
+    sequenceState.sourceTempo = tempo;
 
     // Set starting note selector to match the first note of the custom sequence
     if (notes.length > 0) {

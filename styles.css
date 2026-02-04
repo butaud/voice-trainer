@@ -132,6 +132,11 @@ section {
     transition: transform 0.1s ease-out, filter 0.1s ease-out, box-shadow 0.1s ease-out;
 }
 
+.btn-primary.recording {
+    background: linear-gradient(145deg, #ff6b6b, #ee5a5a);
+    box-shadow: 0 4px 15px rgba(255, 107, 107, 0.4);
+}
+
 .btn-record.beat-pulse {
     transform: scale(1.08);
     filter: brightness(1.2);

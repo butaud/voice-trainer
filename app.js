@@ -306,17 +306,17 @@ function updatePreviewScroll() {
     const elapsed = performance.now() - previewScrollState.noteStartTime;
     const progress = Math.min(1, elapsed / previewScrollState.noteDuration);
 
-    // Interpolate X position within current note
+    // Interpolate X position within current note using per-note spacing
     const nextX = (i < params.notePositions.length - 1)
         ? params.notePositions[i + 1].x
-        : pos.x + params.noteSpacing;
+        : pos.x + pos.spacing;
     const currentX = pos.x + progress * (nextX - pos.x);
 
     sequenceState.previewIndex = i;
 
     // Calculate scroll offset based on current position
     // Add padding so the current note isn't right at the edge
-    const previewPadding = params.noteSpacing * 2;
+    const previewPadding = params.minNoteSpacing * 2;
     const scrollOffset = Math.min(
         Math.max(0, currentX - params.notesStartX - previewPadding),
         params.maxScrollNeeded
@@ -1290,62 +1290,85 @@ function getCumulativeTime(upToIndex) {
 
 // Calculate all scroll-related layout parameters for a sequence
 // Returns object with layout metrics that can be used by any mode
+// Uses duration-based spacing: longer notes get more horizontal space
 function calculateScrollParameters(sequence, canvasWidth) {
     const leftMargin = 15;
     const clefWidth = 40;
     const rightMargin = 15;
     const noteAreaWidth = canvasWidth - leftMargin - clefWidth - rightMargin;
-    const minNoteSpacing = 28;
-    const idealNoteSpacing = Math.min(50, noteAreaWidth / sequence.length);
-    const noteSpacing = Math.max(minNoteSpacing, idealNoteSpacing);
-    const notesStartX = leftMargin + clefWidth + noteSpacing / 2;
+    const minNoteSpacing = 28; // Minimum spacing for the shortest note
+    const maxNoteSpacing = 80; // Cap spacing for very long notes
 
-    // Calculate how many notes can fit (leave room for ellipsis if needed)
-    const ellipsisWidth = 30;
-    const maxNotesVisible = Math.floor((noteAreaWidth - ellipsisWidth / 2) / noteSpacing);
-    const hasEllipsis = sequence.length > maxNotesVisible;
+    // Find minimum duration to use as baseline for spacing
+    const durations = sequence.map(n => getAdjustedDuration(n.duration));
+    const minDuration = Math.min(...durations);
+    const totalDuration = durations.reduce((sum, d) => sum + d, 0);
 
-    // Calculate max scroll needed for long songs
-    const rightEdge = canvasWidth - rightMargin - 10;
-    const lastNoteX = notesStartX + (sequence.length - 1) * noteSpacing;
-    const maxScrollNeeded = Math.max(0, lastNoteX - rightEdge);
+    // Calculate spacing for each note based on duration ratio
+    // Shortest note gets minNoteSpacing, others scale proportionally
+    const noteSpacings = durations.map(d => {
+        const ratio = d / minDuration;
+        return Math.min(maxNoteSpacing, minNoteSpacing * ratio);
+    });
 
-    // Build note positions with timing information
+    // Calculate total width needed for all notes
+    const totalNotesWidth = noteSpacings.reduce((sum, s) => sum + s, 0);
+
+    // Starting X position (leave room for half of first note's spacing)
+    const notesStartX = leftMargin + clefWidth + noteSpacings[0] / 2;
+
+    // Build note positions with cumulative X based on variable spacing
     const notePositions = [];
+    let cumulativeX = notesStartX;
     let cumulativeTime = 0;
     sequence.forEach((note, i) => {
-        const x = notesStartX + i * noteSpacing;
-        const duration = getAdjustedDuration(note.duration);
+        const duration = durations[i];
+        const spacing = noteSpacings[i];
         notePositions.push({
-            x: x,
+            x: cumulativeX,
             startTime: cumulativeTime,
             endTime: cumulativeTime + duration,
-            duration: duration
+            duration: duration,
+            spacing: spacing // Store per-note spacing for interpolation
         });
+        cumulativeX += spacing;
         cumulativeTime += duration;
     });
+
+    // Calculate if scrolling is needed
+    const rightEdge = canvasWidth - rightMargin - 10;
+    const lastNoteX = notePositions[notePositions.length - 1].x;
+    const lastNoteSpacing = noteSpacings[noteSpacings.length - 1];
+    const maxScrollNeeded = Math.max(0, lastNoteX + lastNoteSpacing / 2 - rightEdge);
+    const hasEllipsis = maxScrollNeeded > 0;
+
+    // For compatibility, calculate an "average" note spacing
+    const avgNoteSpacing = totalNotesWidth / sequence.length;
 
     return {
         leftMargin,
         clefWidth,
         rightMargin,
         noteAreaWidth,
-        noteSpacing,
+        noteSpacing: avgNoteSpacing, // Average for compatibility
         notesStartX,
-        maxNotesVisible,
+        maxNotesVisible: Math.floor(noteAreaWidth / minNoteSpacing), // Approximate
         hasEllipsis,
         maxScrollNeeded,
         rightEdge,
         lastNoteX,
         notePositions,
-        totalDuration: cumulativeTime
+        totalDuration,
+        totalNotesWidth,
+        minNoteSpacing,
+        minDuration
     };
 }
 
 // Calculate playback progress at a given elapsed time
 // Returns current note index, progress within that note, and interpolated X position
 function getPlaybackProgress(elapsedTime, scrollParams) {
-    const { notePositions, noteSpacing, notesStartX, maxScrollNeeded } = scrollParams;
+    const { notePositions, notesStartX, maxScrollNeeded } = scrollParams;
 
     let currentNoteIndex = 0;
     let noteProgress = 0;
@@ -1356,13 +1379,14 @@ function getPlaybackProgress(elapsedTime, scrollParams) {
         if (elapsedTime >= pos.startTime && elapsedTime < pos.endTime) {
             currentNoteIndex = i;
             noteProgress = (elapsedTime - pos.startTime) / pos.duration;
-            const nextX = (i < notePositions.length - 1) ? notePositions[i + 1].x : pos.x + noteSpacing;
+            // Use per-note spacing for interpolation
+            const nextX = (i < notePositions.length - 1) ? notePositions[i + 1].x : pos.x + pos.spacing;
             naturalPlayheadX = pos.x + noteProgress * (nextX - pos.x);
             break;
         } else if (elapsedTime >= pos.endTime) {
             currentNoteIndex = i + 1;
             noteProgress = 0;
-            naturalPlayheadX = (i < notePositions.length - 1) ? notePositions[i + 1].x : pos.x + noteSpacing;
+            naturalPlayheadX = (i < notePositions.length - 1) ? notePositions[i + 1].x : pos.x + pos.spacing;
         }
     }
 
@@ -1476,7 +1500,8 @@ function drawSheetMusic(activeIndex = -1, completedUpTo = -1, noteScores = null,
     // Draw all notes with clipping (user can scroll to see them all in idle mode)
     for (let i = 0; i < sequence.length; i++) {
         const note = sequence[i];
-        const x = notesStartX + i * noteSpacing + noteOffsetX - previewScrollOffset - idleScrollOffset;
+        // Use pre-calculated position from notePositions (supports variable spacing)
+        const x = notePositions[i].x + noteOffsetX - previewScrollOffset - idleScrollOffset;
 
         // Skip notes that are past the left edge of the staff or off-screen right
         if (x < clipLeftEdge || x > width + 20) continue;
@@ -1553,7 +1578,7 @@ function drawSheetMusic(activeIndex = -1, completedUpTo = -1, noteScores = null,
             // Redraw notes with scroll offset
             for (let i = 0; i < sequence.length; i++) {
                 const note = sequence[i];
-                const x = notesStartX + i * noteSpacing - scrollOffset;
+                const x = notePositions[i].x - scrollOffset;
                 // Skip notes that are past the left edge of the staff or off-screen right
                 if (x < clipLeftEdge || x > width + 20) continue;
 
@@ -1588,21 +1613,21 @@ function drawSheetMusic(activeIndex = -1, completedUpTo = -1, noteScores = null,
                     // Previous point
                     if (prev.time >= pos.startTime && prev.time < pos.endTime) {
                         const progress = (prev.time - pos.startTime) / pos.duration;
-                        const nextX = (j < notePositions.length - 1) ? notePositions[j + 1].x : pos.x + noteSpacing;
+                        const nextX = (j < notePositions.length - 1) ? notePositions[j + 1].x : pos.x + pos.spacing;
                         prevX = pos.x + progress * (nextX - pos.x) - scrollOffset;
                     } else if (prev.time >= pos.endTime) {
                         // Point is past this note, update to end of this note
-                        const nextX = (j < notePositions.length - 1) ? notePositions[j + 1].x : pos.x + noteSpacing;
+                        const nextX = (j < notePositions.length - 1) ? notePositions[j + 1].x : pos.x + pos.spacing;
                         prevX = nextX - scrollOffset;
                     }
                     // Current point
                     if (curr.time >= pos.startTime && curr.time < pos.endTime) {
                         const progress = (curr.time - pos.startTime) / pos.duration;
-                        const nextX = (j < notePositions.length - 1) ? notePositions[j + 1].x : pos.x + noteSpacing;
+                        const nextX = (j < notePositions.length - 1) ? notePositions[j + 1].x : pos.x + pos.spacing;
                         currX = pos.x + progress * (nextX - pos.x) - scrollOffset;
                     } else if (curr.time >= pos.endTime) {
                         // Point is past this note, update to end of this note
-                        const nextX = (j < notePositions.length - 1) ? notePositions[j + 1].x : pos.x + noteSpacing;
+                        const nextX = (j < notePositions.length - 1) ? notePositions[j + 1].x : pos.x + pos.spacing;
                         currX = nextX - scrollOffset;
                     }
                 }
@@ -1970,15 +1995,14 @@ function drawCountdownVisualization(count, progress = 0) {
 
     // Use shared scroll parameters
     const scrollParams = calculateScrollParameters(sequence, width);
-    const { noteSpacing, notesStartX } = scrollParams;
+    const { notesStartX, minNoteSpacing, minDuration, totalNotesWidth, totalDuration } = scrollParams;
 
     // Calculate scroll rate to match playback speed
-    // Countdown is 3 beats. During playback, notes scroll at noteSpacing per note duration.
-    // So maxOffset = how far playback would scroll in 3 beats
-    const firstNoteDuration = getAdjustedDuration(sequence[0].duration);
+    // With duration-based spacing, scroll rate is constant: totalNotesWidth / totalDuration
+    // In 3 beats, we scroll: countdownDuration * (totalNotesWidth / totalDuration)
     const countdownDuration = 3 * sequenceState.countdownBeatInterval;
-    const notesIn3Beats = countdownDuration / firstNoteDuration;
-    const maxOffset = notesIn3Beats * noteSpacing;
+    const scrollRate = totalNotesWidth / totalDuration; // pixels per ms
+    const maxOffset = countdownDuration * scrollRate;
     const noteOffsetX = maxOffset * (1 - progress);
 
     // Draw sheet music with first note highlighted and offset applied

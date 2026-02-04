@@ -177,6 +177,17 @@ function parseMusicXMLPart(doc, partId) {
     const divisionsEl = doc.querySelector('divisions');
     const divisions = divisionsEl ? parseInt(divisionsEl.textContent) : 1;
 
+    // Get time signature (default to 4/4)
+    let timeBeats = 4;
+    let timeBeatType = 4;
+    const timeEl = doc.querySelector('time');
+    if (timeEl) {
+        const beatsEl = timeEl.querySelector('beats');
+        const beatTypeEl = timeEl.querySelector('beat-type');
+        if (beatsEl) timeBeats = parseInt(beatsEl.textContent);
+        if (beatTypeEl) timeBeatType = parseInt(beatTypeEl.textContent);
+    }
+
     // Calculate ms per division
     const msPerBeat = 60000 / tempo; // ms per quarter note
     const msPerDivision = msPerBeat / divisions;
@@ -250,7 +261,10 @@ function parseMusicXMLPart(doc, partId) {
         throw new Error('No notes found in selected part');
     }
 
-    return notes;
+    return {
+        notes: notes,
+        timeSignature: { beats: timeBeats, beatType: timeBeatType }
+    };
 }
 
 // Sequence state
@@ -271,7 +285,9 @@ const sequenceState = {
     timeOnPitch: 0,
     // For integrated sheet music visualization
     sequenceStartTime: 0,      // When the sequence started (after countdown)
-    globalPitchTrace: []       // Array of {time, frequency, noteIndex} for entire sequence
+    globalPitchTrace: [],      // Array of {time, frequency, noteIndex} for entire sequence
+    // Time signature for beat calculation (from MusicXML or default 4/4)
+    timeSignature: { beats: 4, beatType: 4 }
 };
 
 // Preview scroll animation state - uses shared scroll utilities
@@ -1015,6 +1031,11 @@ function loadSequence(id) {
         };
     });
 
+    // Reset time signature to 4/4 for built-in sequences (not custom, which sets it before calling this)
+    if (id !== 'custom') {
+        sequenceState.timeSignature = { beats: 4, beatType: 4 };
+    }
+
     // Reset user scroll when sequence changes
     userScrollState.offset = 0;
 
@@ -1297,7 +1318,6 @@ function calculateScrollParameters(sequence, canvasWidth) {
     const rightMargin = 15;
     const noteAreaWidth = canvasWidth - leftMargin - clefWidth - rightMargin;
     const minNoteSpacing = 28; // Minimum spacing for the shortest note
-    const maxNoteSpacing = 80; // Cap spacing for very long notes
 
     // Find minimum duration to use as baseline for spacing
     const durations = sequence.map(n => getAdjustedDuration(n.duration));
@@ -1306,9 +1326,10 @@ function calculateScrollParameters(sequence, canvasWidth) {
 
     // Calculate spacing for each note based on duration ratio
     // Shortest note gets minNoteSpacing, others scale proportionally
+    // No cap - proportional spacing is required for constant scroll rate
     const noteSpacings = durations.map(d => {
         const ratio = d / minDuration;
-        return Math.min(maxNoteSpacing, minNoteSpacing * ratio);
+        return minNoteSpacing * ratio;
     });
 
     // Calculate total width needed for all notes
@@ -1876,21 +1897,45 @@ function runCountdown() {
     if (!sequenceState.isCountingDown) return;
 
     const ctx = getAudioContext();
-    // Calculate quarter note beat interval from first note's duration and type
+
+    // Calculate beat interval based on time signature
+    // First, get the quarter note duration from the first note
     const firstNote = sequenceState.currentSequence[0];
     const firstNoteDuration = getAdjustedDuration(firstNote.duration);
     const noteType = firstNote.noteType || NOTE_TYPES.QUARTER;
 
-    // Convert to quarter note duration for countdown beat
-    let beatIntervalMs;
+    // Convert first note duration to quarter note duration
+    let quarterNoteDuration;
     if (noteType === NOTE_TYPES.EIGHTH) {
-        beatIntervalMs = firstNoteDuration * 2; // Eighth note = half a beat
+        quarterNoteDuration = firstNoteDuration * 2;
     } else if (noteType === NOTE_TYPES.HALF) {
-        beatIntervalMs = firstNoteDuration / 2; // Half note = 2 beats
+        quarterNoteDuration = firstNoteDuration / 2;
     } else if (noteType === NOTE_TYPES.WHOLE) {
-        beatIntervalMs = firstNoteDuration / 4; // Whole note = 4 beats
+        quarterNoteDuration = firstNoteDuration / 4;
     } else {
-        beatIntervalMs = firstNoteDuration; // Quarter note = 1 beat
+        quarterNoteDuration = firstNoteDuration;
+    }
+
+    // Calculate beat duration from time signature
+    const { beats, beatType } = sequenceState.timeSignature;
+
+    // Check if this is compound time (6/8, 9/8, 12/8)
+    // In compound time, we count in dotted quarters (3 eighth notes per beat)
+    const isCompoundTime = beatType === 8 && (beats === 6 || beats === 9 || beats === 12);
+
+    let beatIntervalMs;
+    if (isCompoundTime) {
+        // Compound time: beat = dotted quarter = 1.5 quarter notes
+        beatIntervalMs = quarterNoteDuration * 1.5;
+    } else if (beatType === 8) {
+        // Simple time with eighth note beat (uncommon, but 3/8 etc.)
+        beatIntervalMs = quarterNoteDuration / 2;
+    } else if (beatType === 2) {
+        // Half note beat
+        beatIntervalMs = quarterNoteDuration * 2;
+    } else {
+        // Quarter note beat (most common: 2/4, 3/4, 4/4)
+        beatIntervalMs = quarterNoteDuration;
     }
 
     const beatIntervalSec = beatIntervalMs / 1000;
@@ -2113,9 +2158,11 @@ function analyzeSequence(timestamp) {
         recentPitches.length = 0;
     }
 
-    // Pulse on quarter note beats
-    const currentBeat = Math.floor(playbackTime / sequenceState.countdownBeatInterval);
-    if (currentBeat !== lastPlaybackBeat) {
+    // Pulse on beats - calculate from total duration to stay in sync with note timing
+    // This prevents drift that can occur with fixed interval calculation
+    const totalBeats = Math.round(scrollParams.totalDuration / sequenceState.countdownBeatInterval);
+    const currentBeat = Math.floor((playbackTime / scrollParams.totalDuration) * totalBeats);
+    if (currentBeat !== lastPlaybackBeat && currentBeat < totalBeats) {
         lastPlaybackBeat = currentBeat;
         triggerBeatPulse();
     }
@@ -2521,8 +2568,8 @@ musicxmlFile.addEventListener('change', async (e) => {
 
         if (parts.length === 1) {
             // Single part - load directly
-            const notes = parseMusicXMLPart(doc, parts[0].id);
-            loadCustomSequence(notes, file.name);
+            const result = parseMusicXMLPart(doc, parts[0].id);
+            loadCustomSequence(result.notes, file.name, result.timeSignature);
         } else {
             // Multiple parts - show selector and auto-load first part
             musicxmlPartSelect.innerHTML = parts.map(p =>
@@ -2531,8 +2578,8 @@ musicxmlFile.addEventListener('change', async (e) => {
             musicxmlPartSelector.style.display = '';
 
             // Auto-load the first part
-            const notes = parseMusicXMLPart(doc, parts[0].id);
-            loadCustomSequence(notes, file.name);
+            const result = parseMusicXMLPart(doc, parts[0].id);
+            loadCustomSequence(result.notes, file.name, result.timeSignature);
         }
     } catch (err) {
         console.error('MusicXML parse error:', err);
@@ -2548,8 +2595,8 @@ musicxmlPartSelect.addEventListener('change', () => {
 
     const partId = musicxmlPartSelect.value;
     try {
-        const notes = parseMusicXMLPart(currentMusicXMLDoc, partId);
-        loadCustomSequence(notes, currentMusicXMLFilename);
+        const result = parseMusicXMLPart(currentMusicXMLDoc, partId);
+        loadCustomSequence(result.notes, currentMusicXMLFilename, result.timeSignature);
     } catch (err) {
         console.error('MusicXML parse error:', err);
         sequenceStatus.textContent = `Error: ${err.message}`;
@@ -2557,8 +2604,11 @@ musicxmlPartSelect.addEventListener('change', () => {
 });
 
 // Helper to load custom sequence
-function loadCustomSequence(notes, filename) {
+function loadCustomSequence(notes, filename, timeSignature = null) {
     sequences['custom'].notes = notes;
+
+    // Store time signature (default to 4/4 if not provided)
+    sequenceState.timeSignature = timeSignature || { beats: 4, beatType: 4 };
 
     // Set starting note selector to match the first note of the custom sequence
     if (notes.length > 0) {

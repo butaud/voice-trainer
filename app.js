@@ -265,7 +265,6 @@ const sequenceState = {
     countdownLastBeat: -1,
     currentSequence: [],
     currentNoteIndex: 0,
-    noteStartTime: 0,
     noteScores: [],
     pitchSamplesForNote: [],
     pitchHistory: [],          // Timeline history for visualization
@@ -275,20 +274,19 @@ const sequenceState = {
     globalPitchTrace: []       // Array of {time, frequency, noteIndex} for entire sequence
 };
 
-// Preview scroll animation state - syncs to audio callbacks
+// Preview scroll animation state - uses shared scroll utilities
 const previewScrollState = {
     animationId: null,
-    noteSpacing: 0,
-    notesStartX: 0,
-    maxScrollNeeded: 0,
+    scrollParams: null,      // From calculateScrollParameters()
+    startTime: 0,            // When preview started (performance.now())
+    // Timing is synced to audio callbacks, so we track per-note timing
     currentNoteIndex: 0,
     noteStartTime: 0,
-    noteDuration: 0,
-    notePositions: [] // Array of {x}
+    noteDuration: 0
 };
 
 function updatePreviewScroll() {
-    if (!sequenceState.isPreviewing) {
+    if (!sequenceState.isPreviewing || !previewScrollState.scrollParams) {
         if (previewScrollState.animationId) {
             cancelAnimationFrame(previewScrollState.animationId);
             previewScrollState.animationId = null;
@@ -296,8 +294,9 @@ function updatePreviewScroll() {
         return;
     }
 
+    const params = previewScrollState.scrollParams;
     const i = previewScrollState.currentNoteIndex;
-    const pos = previewScrollState.notePositions[i];
+    const pos = params.notePositions[i];
     if (!pos) {
         previewScrollState.animationId = requestAnimationFrame(updatePreviewScroll);
         return;
@@ -308,40 +307,38 @@ function updatePreviewScroll() {
     const progress = Math.min(1, elapsed / previewScrollState.noteDuration);
 
     // Interpolate X position within current note
-    const nextX = (i < previewScrollState.notePositions.length - 1)
-        ? previewScrollState.notePositions[i + 1].x
-        : pos.x + previewScrollState.noteSpacing;
+    const nextX = (i < params.notePositions.length - 1)
+        ? params.notePositions[i + 1].x
+        : pos.x + params.noteSpacing;
     const currentX = pos.x + progress * (nextX - pos.x);
 
     sequenceState.previewIndex = i;
 
     // Calculate scroll offset based on current position
     // Add padding so the current note isn't right at the edge
-    const previewPadding = previewScrollState.noteSpacing * 2;
+    const previewPadding = params.noteSpacing * 2;
     const scrollOffset = Math.min(
-        Math.max(0, currentX - previewScrollState.notesStartX - previewPadding),
-        previewScrollState.maxScrollNeeded
+        Math.max(0, currentX - params.notesStartX - previewPadding),
+        params.maxScrollNeeded
     );
 
     drawSheetMusic(sequenceState.previewIndex, sequenceState.previewIndex, null, -1, false, 0, scrollOffset);
     previewScrollState.animationId = requestAnimationFrame(updatePreviewScroll);
 }
 
-// Called when a new note starts playing
+// Called when a new note starts playing (syncs visual to audio)
 function onPreviewNoteStart(noteIndex, noteDuration) {
     previewScrollState.currentNoteIndex = noteIndex;
     previewScrollState.noteStartTime = performance.now();
     previewScrollState.noteDuration = noteDuration;
 }
 
-function startPreviewScrollAnimation(notePositions, noteSpacing, notesStartX, maxScrollNeeded) {
-    previewScrollState.notePositions = notePositions;
-    previewScrollState.noteSpacing = noteSpacing;
-    previewScrollState.notesStartX = notesStartX;
-    previewScrollState.maxScrollNeeded = maxScrollNeeded;
+function startPreviewScrollAnimation(scrollParams) {
+    previewScrollState.scrollParams = scrollParams;
     previewScrollState.currentNoteIndex = 0;
+    previewScrollState.startTime = performance.now();
     previewScrollState.noteStartTime = performance.now();
-    previewScrollState.noteDuration = 1000; // Will be updated by first note
+    previewScrollState.noteDuration = scrollParams.notePositions[0]?.duration || 1000;
 
     if (!previewScrollState.animationId) {
         previewScrollState.animationId = requestAnimationFrame(updatePreviewScroll);
@@ -353,6 +350,7 @@ function stopPreviewScrollAnimation() {
         cancelAnimationFrame(previewScrollState.animationId);
         previewScrollState.animationId = null;
     }
+    previewScrollState.scrollParams = null;
 }
 
 function getFrequency(note, octave) {
@@ -1199,6 +1197,110 @@ function getCumulativeTime(upToIndex) {
     return time;
 }
 
+// =============================================================================
+// SHARED SCROLL/PLAYBACK UTILITIES
+// Used by both preview mode and listening mode for consistent behavior
+// =============================================================================
+
+// Calculate all scroll-related layout parameters for a sequence
+// Returns object with layout metrics that can be used by any mode
+function calculateScrollParameters(sequence, canvasWidth) {
+    const leftMargin = 15;
+    const clefWidth = 40;
+    const rightMargin = 15;
+    const noteAreaWidth = canvasWidth - leftMargin - clefWidth - rightMargin;
+    const minNoteSpacing = 28;
+    const idealNoteSpacing = Math.min(50, noteAreaWidth / sequence.length);
+    const noteSpacing = Math.max(minNoteSpacing, idealNoteSpacing);
+    const notesStartX = leftMargin + clefWidth + noteSpacing / 2;
+
+    // Calculate how many notes can fit (leave room for ellipsis if needed)
+    const ellipsisWidth = 30;
+    const maxNotesVisible = Math.floor((noteAreaWidth - ellipsisWidth / 2) / noteSpacing);
+    const hasEllipsis = sequence.length > maxNotesVisible;
+
+    // Calculate max scroll needed for long songs
+    const rightEdge = canvasWidth - rightMargin - 10;
+    const lastNoteX = notesStartX + (sequence.length - 1) * noteSpacing;
+    const maxScrollNeeded = Math.max(0, lastNoteX - rightEdge);
+
+    // Build note positions with timing information
+    const notePositions = [];
+    let cumulativeTime = 0;
+    sequence.forEach((note, i) => {
+        const x = notesStartX + i * noteSpacing;
+        const duration = getAdjustedDuration(note.duration);
+        notePositions.push({
+            x: x,
+            startTime: cumulativeTime,
+            endTime: cumulativeTime + duration,
+            duration: duration
+        });
+        cumulativeTime += duration;
+    });
+
+    return {
+        leftMargin,
+        clefWidth,
+        rightMargin,
+        noteAreaWidth,
+        noteSpacing,
+        notesStartX,
+        maxNotesVisible,
+        hasEllipsis,
+        maxScrollNeeded,
+        rightEdge,
+        lastNoteX,
+        notePositions,
+        totalDuration: cumulativeTime
+    };
+}
+
+// Calculate playback progress at a given elapsed time
+// Returns current note index, progress within that note, and interpolated X position
+function getPlaybackProgress(elapsedTime, scrollParams) {
+    const { notePositions, noteSpacing, notesStartX, maxScrollNeeded } = scrollParams;
+
+    let currentNoteIndex = 0;
+    let noteProgress = 0;
+    let naturalPlayheadX = notesStartX;
+
+    for (let i = 0; i < notePositions.length; i++) {
+        const pos = notePositions[i];
+        if (elapsedTime >= pos.startTime && elapsedTime < pos.endTime) {
+            currentNoteIndex = i;
+            noteProgress = (elapsedTime - pos.startTime) / pos.duration;
+            const nextX = (i < notePositions.length - 1) ? notePositions[i + 1].x : pos.x + noteSpacing;
+            naturalPlayheadX = pos.x + noteProgress * (nextX - pos.x);
+            break;
+        } else if (elapsedTime >= pos.endTime) {
+            currentNoteIndex = i + 1;
+            noteProgress = 0;
+            naturalPlayheadX = (i < notePositions.length - 1) ? notePositions[i + 1].x : pos.x + noteSpacing;
+        }
+    }
+
+    // Clamp note index to valid range
+    currentNoteIndex = Math.min(currentNoteIndex, notePositions.length - 1);
+
+    // Calculate scroll offset for long songs
+    const currentScroll = naturalPlayheadX - notesStartX;
+    const scrollOffset = Math.min(Math.max(0, currentScroll), maxScrollNeeded);
+
+    // Playhead stays fixed while scrolling, then moves normally
+    const playheadX = notesStartX + Math.max(0, currentScroll - maxScrollNeeded);
+
+    return {
+        currentNoteIndex,
+        noteProgress,
+        naturalPlayheadX,
+        scrollOffset,
+        playheadX
+    };
+}
+
+// =============================================================================
+
 // Convert frequency to Y position on staff
 function frequencyToStaffY(frequency, clef, staffTop, lineSpacing) {
     // Convert frequency to note name and octave
@@ -1239,36 +1341,14 @@ function drawSheetMusic(activeIndex = -1, completedUpTo = -1, noteScores = null,
     const staffTop = 55;
     const lineSpacing = 10;
     const clef = getBestClef(sequence);
-    const clefWidth = 40;
-    const leftMargin = 15;
-    const rightMargin = 15;
-    const noteAreaWidth = width - leftMargin - clefWidth - rightMargin;
-    const minNoteSpacing = 28;
-    const idealNoteSpacing = Math.min(50, noteAreaWidth / sequence.length);
-    const noteSpacing = Math.max(minNoteSpacing, idealNoteSpacing);
-    const notesStartX = leftMargin + clefWidth + noteSpacing / 2;
 
-    // Calculate how many notes can fit (leave room for ellipsis if needed)
-    const ellipsisWidth = 30;
-    const maxNotesVisible = Math.floor((noteAreaWidth - ellipsisWidth / 2) / noteSpacing);
+    // Use shared scroll parameter calculation
+    const scrollParams = calculateScrollParameters(sequence, width);
+    const {
+        leftMargin, clefWidth, rightMargin, noteSpacing, notesStartX,
+        maxNotesVisible, hasEllipsis, maxScrollNeeded, notePositions, totalDuration
+    } = scrollParams;
     const notesToShow = Math.min(sequence.length, maxNotesVisible);
-    const hasEllipsis = sequence.length > notesToShow;
-
-    // Calculate note X positions and time boundaries for playback visualization
-    const notePositions = [];
-    let cumulativeTime = 0;
-    sequence.forEach((note, i) => {
-        const x = notesStartX + i * noteSpacing;
-        const duration = getAdjustedDuration(note.duration);
-        notePositions.push({
-            x: x,
-            startTime: cumulativeTime,
-            endTime: cumulativeTime + duration,
-            duration: duration
-        });
-        cumulativeTime += duration;
-    });
-    const totalDuration = cumulativeTime;
 
     // Draw staff lines
     ctx.strokeStyle = '#555';
@@ -1338,38 +1418,13 @@ function drawSheetMusic(activeIndex = -1, completedUpTo = -1, noteScores = null,
     // Draw playback visualization if in playback mode or showing final trace
     const showVisualization = (playbackTime >= 0 && sequenceState.isPlaying) || showFinalTrace;
     if (showVisualization) {
-        // Calculate the "natural" playhead X position (where it would be without scrolling)
-        let naturalPlayheadX = notesStartX;
-        if (playbackTime >= 0) {
-            for (let i = 0; i < notePositions.length; i++) {
-                const pos = notePositions[i];
-                if (playbackTime >= pos.startTime && playbackTime < pos.endTime) {
-                    const progress = (playbackTime - pos.startTime) / pos.duration;
-                    const nextX = (i < notePositions.length - 1) ? notePositions[i + 1].x : pos.x + noteSpacing;
-                    naturalPlayheadX = pos.x + progress * (nextX - pos.x);
-                    break;
-                } else if (playbackTime >= pos.endTime) {
-                    naturalPlayheadX = (i < notePositions.length - 1) ? notePositions[i + 1].x : pos.x + noteSpacing / 2;
-                }
-            }
-        }
+        // Use shared function to calculate playhead position and scroll offset
+        const progress = playbackTime >= 0
+            ? getPlaybackProgress(playbackTime, scrollParams)
+            : { scrollOffset: 0, playheadX: notesStartX, naturalPlayheadX: notesStartX };
 
-        // For long songs, calculate scroll offset to keep playhead fixed until all notes fit
-        let scrollOffset = 0;
-        let playheadX = naturalPlayheadX;
-        const rightEdge = width - rightMargin - 10;
-        const lastNoteX = notesStartX + (sequence.length - 1) * noteSpacing;
-
-        if (hasEllipsis && playbackTime >= 0) {
-            // Max scroll needed: distance from last note to right edge
-            const maxScrollNeeded = lastNoteX - rightEdge;
-            // Current scroll: how far playhead has moved from start
-            const currentScroll = naturalPlayheadX - notesStartX;
-            // Apply scroll offset (capped at max needed)
-            scrollOffset = Math.min(currentScroll, maxScrollNeeded);
-            // Playhead stays fixed while scrolling, then moves normally
-            playheadX = notesStartX + Math.max(0, currentScroll - maxScrollNeeded);
-        }
+        let scrollOffset = hasEllipsis ? progress.scrollOffset : 0;
+        let playheadX = hasEllipsis ? progress.playheadX : progress.naturalPlayheadX;
 
         // Redraw notes with scroll offset during playback
         if (scrollOffset > 0) {
@@ -1399,10 +1454,8 @@ function drawSheetMusic(activeIndex = -1, completedUpTo = -1, noteScores = null,
             for (let i = 0; i < sequence.length; i++) {
                 const note = sequence[i];
                 const x = notesStartX + i * noteSpacing - scrollOffset;
-                // Skip notes that are off-screen to the left
-                if (x < leftMargin - 20) continue;
-                // Skip notes that are off-screen to the right
-                if (x > width + 20) continue;
+                // Skip notes that are past the left edge of the staff or off-screen right
+                if (x < clipLeftEdge || x > width + 20) continue;
 
                 const staffPos = getStaffPosition(note.note, note.octave);
                 const y = getYForStaffPosition(staffPos, clef, staffTop, lineSpacing);
@@ -1543,30 +1596,11 @@ function previewSequence() {
 
     const notes = sequenceState.currentSequence;
 
-    // Calculate scroll parameters (same as in drawSheetMusic)
-    const canvas = sheetMusicCanvas;
-    const clefWidth = 40;
-    const leftMargin = 15;
-    const rightMargin = 15;
-    const noteAreaWidth = canvas.width - leftMargin - clefWidth - rightMargin;
-    const minNoteSpacing = 28;
-    const idealNoteSpacing = Math.min(50, noteAreaWidth / notes.length);
-    const noteSpacing = Math.max(minNoteSpacing, idealNoteSpacing);
-    const notesStartX = leftMargin + clefWidth + noteSpacing / 2;
-    const rightEdge = canvas.width - rightMargin - 10;
-    const lastNoteX = notesStartX + (notes.length - 1) * noteSpacing;
-    const maxScrollNeeded = Math.max(0, lastNoteX - rightEdge);
+    // Use shared scroll parameter calculation
+    const scrollParams = calculateScrollParameters(notes, sheetMusicCanvas.width);
 
-    // Build note positions (just X coordinates, timing syncs to audio callbacks)
-    const notePositions = [];
-    notes.forEach((note, i) => {
-        notePositions.push({
-            x: notesStartX + i * noteSpacing
-        });
-    });
-
-    // Start smooth scroll animation
-    startPreviewScrollAnimation(notePositions, noteSpacing, notesStartX, maxScrollNeeded);
+    // Start smooth scroll animation with shared params
+    startPreviewScrollAnimation(scrollParams);
 
     let index = 0;
 
@@ -1807,7 +1841,6 @@ function runCountdown() {
             sequenceStatus.textContent = 'Sing!';
             sequenceState.isCountingDown = false;
             sequenceState.isPlaying = true;
-            sequenceState.noteStartTime = performance.now();
             sequenceState.sequenceStartTime = performance.now();
             sequenceState.globalPitchTrace = [];
             lastPlaybackBeat = -1; // Reset beat tracker for pulse
@@ -1831,17 +1864,17 @@ function drawCountdownVisualization(count, progress = 0) {
     const sequence = sequenceState.currentSequence;
     if (sequence.length === 0) return;
 
-    // Calculate note spacing (same as in drawSheetMusic)
-    const clefWidth = 40;
-    const leftMargin = 15;
-    const rightMargin = 15;
-    const noteAreaWidth = width - leftMargin - clefWidth - rightMargin;
-    const noteSpacing = Math.min(50, noteAreaWidth / sequence.length);
-    const notesStartX = leftMargin + clefWidth + noteSpacing / 2;
+    // Use shared scroll parameters
+    const scrollParams = calculateScrollParameters(sequence, width);
+    const { noteSpacing, notesStartX } = scrollParams;
 
-    // Notes start offset to the right and scroll left at quarter note speed
-    // Countdown is 3 beats, so offset starts at 3 * noteSpacing and decreases to 0
-    const maxOffset = 3 * noteSpacing;
+    // Calculate scroll rate to match playback speed
+    // Countdown is 3 beats. During playback, notes scroll at noteSpacing per note duration.
+    // So maxOffset = how far playback would scroll in 3 beats
+    const firstNoteDuration = getAdjustedDuration(sequence[0].duration);
+    const countdownDuration = 3 * sequenceState.countdownBeatInterval;
+    const notesIn3Beats = countdownDuration / firstNoteDuration;
+    const maxOffset = notesIn3Beats * noteSpacing;
     const noteOffsetX = maxOffset * (1 - progress);
 
     // Draw sheet music with first note highlighted and offset applied
@@ -1924,13 +1957,36 @@ let lastPlaybackBeat = -1;
 function analyzeSequence(timestamp) {
     if (!sequenceState.isPlaying) return;
 
-    const currentNote = sequenceState.currentSequence[sequenceState.currentNoteIndex];
-    const adjustedDuration = getAdjustedDuration(currentNote.duration);
-    const elapsed = timestamp - sequenceState.noteStartTime;
+    // Use global timing for everything to prevent drift
+    const playbackTime = timestamp - sequenceState.sequenceStartTime;
+
+    // Calculate scroll params and current note from global time (same as playhead)
+    const scrollParams = calculateScrollParameters(sequenceState.currentSequence, sheetMusicCanvas.width);
+    const progress = getPlaybackProgress(playbackTime, scrollParams);
+
+    // Check if sequence is complete
+    if (playbackTime >= scrollParams.totalDuration) {
+        // Finalize any remaining note
+        if (sequenceState.currentNoteIndex < sequenceState.currentSequence.length) {
+            finalizeCurrentNote();
+        }
+        finishSequence();
+        return;
+    }
+
+    // Detect note advancement based on global time (not per-note timing)
+    const targetNoteIndex = progress.currentNoteIndex;
+    while (sequenceState.currentNoteIndex < targetNoteIndex) {
+        finalizeCurrentNote();
+        sequenceState.currentNoteIndex++;
+        sequenceState.pitchSamplesForNote = [];
+        sequenceState.pitchHistory = [];
+        sequenceState.timeOnPitch = 0;
+        recentPitches.length = 0;
+    }
 
     // Pulse on quarter note beats
-    const playbackElapsed = timestamp - sequenceState.sequenceStartTime;
-    const currentBeat = Math.floor(playbackElapsed / sequenceState.countdownBeatInterval);
+    const currentBeat = Math.floor(playbackTime / sequenceState.countdownBeatInterval);
     if (currentBeat !== lastPlaybackBeat) {
         lastPlaybackBeat = currentBeat;
         triggerBeatPulse();
@@ -1940,6 +1996,7 @@ function analyzeSequence(timestamp) {
     if (timestamp - lastSequenceSampleTime >= sequenceSampleInterval) {
         lastSequenceSampleTime = timestamp;
 
+        const currentNote = sequenceState.currentSequence[sequenceState.currentNoteIndex];
         const buffer = new Float32Array(analyser.fftSize);
         analyser.getFloatTimeDomainData(buffer);
 
@@ -1953,7 +2010,7 @@ function analyzeSequence(timestamp) {
 
             // Add to global pitch trace for integrated visualization
             sequenceState.globalPitchTrace.push({
-                time: timestamp - sequenceState.sequenceStartTime,
+                time: playbackTime,
                 frequency: pitch,
                 noteIndex: sequenceState.currentNoteIndex,
                 cents: cents
@@ -1967,22 +2024,14 @@ function analyzeSequence(timestamp) {
         }
     }
 
-    // Check if note time has expired (using tempo-adjusted duration)
-    if (elapsed >= adjustedDuration) {
-        advanceNote();
-        // Check if sequence finished
-        if (!sequenceState.isPlaying) return;
-    }
-
     // Draw integrated visualization on sheet music
-    const playbackTime = timestamp - sequenceState.sequenceStartTime;
     drawSheetMusic(sequenceState.currentNoteIndex, sequenceState.currentNoteIndex, sequenceState.noteScores, playbackTime);
 
     animationId = requestAnimationFrame(analyzeSequence);
 }
 
-// Advance to next note
-function advanceNote() {
+// Finalize scoring for current note (called when advancing to next note)
+function finalizeCurrentNote() {
     const currentNote = sequenceState.currentSequence[sequenceState.currentNoteIndex];
     const adjustedDuration = getAdjustedDuration(currentNote.duration);
     const score = calculateNoteScore(
@@ -2000,19 +2049,6 @@ function advanceNote() {
         timeOnPitch: sequenceState.timeOnPitch,
         totalTime: currentNote.duration
     });
-
-    sequenceState.currentNoteIndex++;
-    sequenceState.pitchSamplesForNote = [];
-    sequenceState.pitchHistory = [];  // Clear timeline for new note
-    sequenceState.timeOnPitch = 0;
-    sequenceState.noteStartTime = performance.now();
-    recentPitches.length = 0;
-
-    if (sequenceState.currentNoteIndex >= sequenceState.currentSequence.length) {
-        finishSequence();
-    } else {
-        updatePreviewNotesState();
-    }
 }
 
 // Calculate score for a single note

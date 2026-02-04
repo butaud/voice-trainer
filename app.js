@@ -842,6 +842,89 @@ const startNoteSelect = document.getElementById('start-note-select');
 const startOctaveSelect = document.getElementById('start-octave-select');
 const sheetMusicCanvas = document.getElementById('sheet-music-canvas');
 const sheetMusicCtx = sheetMusicCanvas.getContext('2d');
+
+// User scroll state for manually scrolling long scores when idle
+const userScrollState = {
+    offset: 0,
+    maxOffset: 0,
+    isDragging: false,
+    startX: 0,
+    startOffset: 0
+};
+
+// Sheet music scroll event handlers
+sheetMusicCanvas.addEventListener('mousedown', (e) => {
+    if (sequenceState.isPlaying || sequenceState.isPreviewing || sequenceState.isCountingDown) return;
+    if (userScrollState.maxOffset <= 0) return;
+
+    userScrollState.isDragging = true;
+    userScrollState.startX = e.clientX;
+    userScrollState.startOffset = userScrollState.offset;
+    sheetMusicCanvas.style.cursor = 'grabbing';
+});
+
+sheetMusicCanvas.addEventListener('mousemove', (e) => {
+    if (!userScrollState.isDragging) {
+        // Show grab cursor if scrollable
+        if (userScrollState.maxOffset > 0 && !sequenceState.isPlaying && !sequenceState.isPreviewing && !sequenceState.isCountingDown) {
+            sheetMusicCanvas.style.cursor = 'grab';
+        } else {
+            sheetMusicCanvas.style.cursor = 'default';
+        }
+        return;
+    }
+
+    const deltaX = userScrollState.startX - e.clientX;
+    userScrollState.offset = Math.max(0, Math.min(userScrollState.maxOffset, userScrollState.startOffset + deltaX));
+    drawSheetMusic(-1, -1);
+});
+
+sheetMusicCanvas.addEventListener('mouseup', () => {
+    if (userScrollState.isDragging) {
+        userScrollState.isDragging = false;
+        sheetMusicCanvas.style.cursor = userScrollState.maxOffset > 0 ? 'grab' : 'default';
+    }
+});
+
+sheetMusicCanvas.addEventListener('mouseleave', () => {
+    if (userScrollState.isDragging) {
+        userScrollState.isDragging = false;
+        sheetMusicCanvas.style.cursor = 'default';
+    }
+});
+
+// Touch support for scrolling
+sheetMusicCanvas.addEventListener('touchstart', (e) => {
+    if (sequenceState.isPlaying || sequenceState.isPreviewing || sequenceState.isCountingDown) return;
+    if (userScrollState.maxOffset <= 0) return;
+
+    userScrollState.isDragging = true;
+    userScrollState.startX = e.touches[0].clientX;
+    userScrollState.startOffset = userScrollState.offset;
+}, { passive: true });
+
+sheetMusicCanvas.addEventListener('touchmove', (e) => {
+    if (!userScrollState.isDragging) return;
+
+    const deltaX = userScrollState.startX - e.touches[0].clientX;
+    userScrollState.offset = Math.max(0, Math.min(userScrollState.maxOffset, userScrollState.startOffset + deltaX));
+    drawSheetMusic(-1, -1);
+}, { passive: true });
+
+sheetMusicCanvas.addEventListener('touchend', () => {
+    userScrollState.isDragging = false;
+});
+
+// Mouse wheel scrolling
+sheetMusicCanvas.addEventListener('wheel', (e) => {
+    if (sequenceState.isPlaying || sequenceState.isPreviewing || sequenceState.isCountingDown) return;
+    if (userScrollState.maxOffset <= 0) return;
+
+    e.preventDefault();
+    userScrollState.offset = Math.max(0, Math.min(userScrollState.maxOffset, userScrollState.offset + e.deltaX + e.deltaY));
+    drawSheetMusic(-1, -1);
+}, { passive: false });
+
 const previewBtn = document.getElementById('preview-btn');
 const goBtn = document.getElementById('go-btn');
 const sequenceCanvas = document.getElementById('sequence-canvas');
@@ -931,6 +1014,9 @@ function loadSequence(id) {
             name: `${transposed.note}${transposed.octave}`
         };
     });
+
+    // Reset user scroll when sequence changes
+    userScrollState.offset = 0;
 
     drawSheetMusic();
     sequenceResults.style.display = 'none';
@@ -1371,21 +1457,26 @@ function drawSheetMusic(activeIndex = -1, completedUpTo = -1, noteScores = null,
     // Middle line of staff (for stem direction)
     const staffMiddleY = staffTop + 2 * lineSpacing;
 
-    // Determine if we're in preview mode (not playing, not counting down)
-    const isPreviewMode = playbackTime === -1 && !sequenceState.isPlaying && !sequenceState.isCountingDown;
-    const isAudioPreviewing = sequenceState.isPreviewing;
+    // Determine if we're in idle mode (not playing, not counting down, not previewing)
+    const isIdleMode = playbackTime === -1 && !sequenceState.isPlaying && !sequenceState.isCountingDown && !sequenceState.isPreviewing;
 
-    // Determine how many notes to draw
-    const showEllipsis = isPreviewMode && hasEllipsis && !isAudioPreviewing;
-    const visibleNoteCount = showEllipsis ? notesToShow : sequence.length;
+    // Update user scroll max offset for idle scrolling
+    if (isIdleMode) {
+        userScrollState.maxOffset = maxScrollNeeded;
+        // Clamp current offset if max changed
+        userScrollState.offset = Math.min(userScrollState.offset, maxScrollNeeded);
+    }
+
+    // Determine scroll offset to apply for idle user scrolling
+    const idleScrollOffset = isIdleMode && hasEllipsis ? userScrollState.offset : 0;
 
     // Left edge for clipping notes (at the clef)
     const clipLeftEdge = leftMargin + clefWidth - 5;
 
-    // Draw notes (with optional X offset for countdown animation or preview scroll)
-    for (let i = 0; i < visibleNoteCount; i++) {
+    // Draw all notes with clipping (user can scroll to see them all in idle mode)
+    for (let i = 0; i < sequence.length; i++) {
         const note = sequence[i];
-        const x = notesStartX + i * noteSpacing + noteOffsetX - previewScrollOffset;
+        const x = notesStartX + i * noteSpacing + noteOffsetX - previewScrollOffset - idleScrollOffset;
 
         // Skip notes that are past the left edge of the staff or off-screen right
         if (x < clipLeftEdge || x > width + 20) continue;
@@ -1404,15 +1495,24 @@ function drawSheetMusic(activeIndex = -1, completedUpTo = -1, noteScores = null,
         drawNote(ctx, x, y, isSharp, isActive, isCompleted, staffMiddleY, score, note.noteType || NOTE_TYPES.QUARTER, note.dotted || false);
     }
 
-    // Draw ellipsis if song is too long and not audio previewing
-    if (showEllipsis) {
-        const ellipsisX = notesStartX + notesToShow * noteSpacing;
-        const ellipsisY = staffTop + 2 * lineSpacing; // Center of staff
-        ctx.fillStyle = '#888';
-        ctx.font = 'bold 20px serif';
-        ctx.textAlign = 'left';
+    // Draw scroll indicators if song is scrollable in idle mode
+    if (isIdleMode && hasEllipsis) {
+        ctx.fillStyle = 'rgba(136, 136, 136, 0.6)';
+        ctx.font = 'bold 16px sans-serif';
         ctx.textBaseline = 'middle';
-        ctx.fillText('...', ellipsisX, ellipsisY);
+        const indicatorY = staffTop + 2 * lineSpacing;
+
+        // Left arrow if scrolled right
+        if (userScrollState.offset > 0) {
+            ctx.textAlign = 'left';
+            ctx.fillText('◀', leftMargin + clefWidth + 5, indicatorY);
+        }
+
+        // Right arrow if more content to the right
+        if (userScrollState.offset < maxScrollNeeded) {
+            ctx.textAlign = 'right';
+            ctx.fillText('▶', width - rightMargin - 5, indicatorY);
+        }
     }
 
     // Draw playback visualization if in playback mode or showing final trace
@@ -1588,6 +1688,9 @@ function previewSequence() {
         return;
     }
 
+    // Reset user scroll offset when starting preview
+    userScrollState.offset = 0;
+
     sequenceState.isPreviewing = true;
     sequenceState.previewIndex = 0;
     previewBtn.textContent = 'Stop';
@@ -1659,6 +1762,7 @@ async function startSequence() {
         sequenceState.pitchHistory = [];
         sequenceState.timeOnPitch = 0;
         recentPitches.length = 0;
+        userScrollState.offset = 0;
 
         previewBtn.disabled = true;
         goBtn.textContent = 'Stop';

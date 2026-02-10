@@ -169,10 +169,17 @@ function parseMusicXMLPart(doc, partId) {
     }
 
     // Get tempo (default to 120 BPM if not specified)
+    // Check multiple locations where tempo can be specified in MusicXML
     let tempo = 120;
     const soundEl = doc.querySelector('sound[tempo]');
     if (soundEl) {
         tempo = parseFloat(soundEl.getAttribute('tempo'));
+    } else {
+        // Also check for metronome marking (common in exported MusicXML)
+        const perMinuteEl = doc.querySelector('metronome per-minute');
+        if (perMinuteEl) {
+            tempo = parseFloat(perMinuteEl.textContent);
+        }
     }
 
     // Get divisions (how many divisions per quarter note)
@@ -1255,7 +1262,7 @@ function drawBassClef(ctx, x, staffTop, lineSpacing) {
 }
 
 // Draw a note with stem (supports different note types)
-function drawNote(ctx, x, y, isSharp, isActive, isCompleted, staffMiddleY, score = null, noteType = NOTE_TYPES.QUARTER, dotted = false) {
+function drawNote(ctx, x, y, isSharp, isActive, isCompleted, staffMiddleY, score = null, noteType = NOTE_TYPES.QUARTER, dotted = false, pulseAmount = 0) {
     ctx.save();
 
     // Determine colors
@@ -1278,6 +1285,18 @@ function drawNote(ctx, x, y, isSharp, isActive, isCompleted, staffMiddleY, score
     }
     ctx.fillStyle = noteColor;
     ctx.strokeStyle = noteColor;
+
+    // Apply pulse effect for active notes (scale and glow)
+    if (pulseAmount > 0) {
+        const scale = 1 + pulseAmount * 0.3; // Scale up to 1.3x at max pulse
+        ctx.translate(x, y);
+        ctx.scale(scale, scale);
+        ctx.translate(-x, -y);
+
+        // Add glow effect
+        ctx.shadowColor = '#4ecdc4';
+        ctx.shadowBlur = 8 + pulseAmount * 12; // 8-20px blur
+    }
 
     // Note head dimensions
     const noteWidth = 7;
@@ -1388,7 +1407,7 @@ function drawNote(ctx, x, y, isSharp, isActive, isCompleted, staffMiddleY, score
 }
 
 // Draw a rest symbol
-function drawRest(ctx, x, staffTop, lineSpacing, isActive, isCompleted, noteType = NOTE_TYPES.QUARTER, dotted = false) {
+function drawRest(ctx, x, staffTop, lineSpacing, isActive, isCompleted, noteType = NOTE_TYPES.QUARTER, dotted = false, pulseAmount = 0) {
     ctx.save();
 
     // Set color based on state
@@ -1401,6 +1420,18 @@ function drawRest(ctx, x, staffTop, lineSpacing, isActive, isCompleted, noteType
     } else {
         ctx.fillStyle = '#fff';
         ctx.strokeStyle = '#fff';
+    }
+
+    // Apply pulse effect for active rests
+    const restCenterY = staffTop + 2 * lineSpacing;
+    if (pulseAmount > 0) {
+        const scale = 1 + pulseAmount * 0.3;
+        ctx.translate(x, restCenterY);
+        ctx.scale(scale, scale);
+        ctx.translate(-x, -restCenterY);
+
+        ctx.shadowColor = '#4ecdc4';
+        ctx.shadowBlur = 8 + pulseAmount * 12;
     }
 
     ctx.lineWidth = 2;
@@ -1726,6 +1757,18 @@ function drawSheetMusic(activeIndex = -1, completedUpTo = -1, noteScores = null,
     // Left edge for clipping notes (at the clef)
     const clipLeftEdge = leftMargin + clefWidth - 5;
 
+    // Calculate pulse amount for active note during playback
+    // Pulse decays from 1 to 0 over 250ms when a note becomes active
+    let activePulseAmount = 0;
+    if (playbackTime >= 0 && sequenceState.isPlaying && activeIndex >= 0 && activeIndex < notePositions.length) {
+        const noteStartTime = notePositions[activeIndex].startTime;
+        const timeSinceNoteStart = playbackTime - noteStartTime;
+        const pulseDuration = 250; // ms
+        if (timeSinceNoteStart >= 0 && timeSinceNoteStart < pulseDuration) {
+            activePulseAmount = 1 - (timeSinceNoteStart / pulseDuration);
+        }
+    }
+
     // Draw all notes with clipping (user can scroll to see them all in idle mode)
     for (let i = 0; i < sequence.length; i++) {
         const note = sequence[i];
@@ -1737,10 +1780,11 @@ function drawSheetMusic(activeIndex = -1, completedUpTo = -1, noteScores = null,
 
         const isActive = i === activeIndex;
         const isCompleted = i < completedUpTo;
+        const pulseAmount = isActive ? activePulseAmount : 0;
 
         if (note.isRest) {
             // Draw rest symbol
-            drawRest(ctx, x, staffTop, lineSpacing, isActive, isCompleted, note.noteType || NOTE_TYPES.QUARTER, note.dotted || false);
+            drawRest(ctx, x, staffTop, lineSpacing, isActive, isCompleted, note.noteType || NOTE_TYPES.QUARTER, note.dotted || false, pulseAmount);
         } else {
             const staffPos = getStaffPosition(note.note, note.octave);
             const y = getYForStaffPosition(staffPos, clef, staffTop, lineSpacing);
@@ -1751,7 +1795,7 @@ function drawSheetMusic(activeIndex = -1, completedUpTo = -1, noteScores = null,
             drawLedgerLines(ctx, x, y, staffTop, lineSpacing, clef);
 
             // Draw the note
-            drawNote(ctx, x, y, isSharp, isActive, isCompleted, staffMiddleY, score, note.noteType || NOTE_TYPES.QUARTER, note.dotted || false);
+            drawNote(ctx, x, y, isSharp, isActive, isCompleted, staffMiddleY, score, note.noteType || NOTE_TYPES.QUARTER, note.dotted || false, pulseAmount);
         }
     }
 
@@ -1821,9 +1865,10 @@ function drawSheetMusic(activeIndex = -1, completedUpTo = -1, noteScores = null,
 
                 const isActive = i === activeIndex;
                 const isCompleted = i < completedUpTo;
+                const pulseAmount = isActive ? activePulseAmount : 0;
 
                 if (note.isRest) {
-                    drawRest(ctx, x, staffTop, lineSpacing, isActive, isCompleted, note.noteType || NOTE_TYPES.QUARTER, note.dotted || false);
+                    drawRest(ctx, x, staffTop, lineSpacing, isActive, isCompleted, note.noteType || NOTE_TYPES.QUARTER, note.dotted || false, pulseAmount);
                 } else {
                     const staffPos = getStaffPosition(note.note, note.octave);
                     const y = getYForStaffPosition(staffPos, clef, staffTop, lineSpacing);
@@ -1831,7 +1876,7 @@ function drawSheetMusic(activeIndex = -1, completedUpTo = -1, noteScores = null,
                     const score = noteScores && noteScores[i] ? noteScores[i].score : null;
 
                     drawLedgerLines(ctx, x, y, staffTop, lineSpacing, clef);
-                    drawNote(ctx, x, y, isSharp, isActive, isCompleted, staffMiddleY, score, note.noteType || NOTE_TYPES.QUARTER, note.dotted || false);
+                    drawNote(ctx, x, y, isSharp, isActive, isCompleted, staffMiddleY, score, note.noteType || NOTE_TYPES.QUARTER, note.dotted || false, pulseAmount);
                 }
             }
         }
@@ -2341,11 +2386,9 @@ function analyzeSequence(timestamp) {
         recentPitches.length = 0;
     }
 
-    // Pulse on beats - calculate from total duration to stay in sync with note timing
-    // This prevents drift that can occur with fixed interval calculation
-    const totalBeats = Math.round(scrollParams.totalDuration / sequenceState.countdownBeatInterval);
-    const currentBeat = Math.floor((playbackTime / scrollParams.totalDuration) * totalBeats);
-    if (currentBeat !== lastPlaybackBeat && currentBeat < totalBeats) {
+    // Pulse on beats - calculate directly from elapsed time for accurate beat timing
+    const currentBeat = Math.floor(playbackTime / sequenceState.countdownBeatInterval);
+    if (currentBeat !== lastPlaybackBeat) {
         lastPlaybackBeat = currentBeat;
         triggerBeatPulse();
     }

@@ -10,12 +10,13 @@ let animationId = null;
 // Note frequencies
 const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
-// Note types: whole, half, quarter, eighth (and dotted variants)
+// Note types: whole, half, quarter, eighth, sixteenth (and dotted variants)
 const NOTE_TYPES = {
     WHOLE: 'whole',
     HALF: 'half',
     QUARTER: 'quarter',
-    EIGHTH: 'eighth'
+    EIGHTH: 'eighth',
+    SIXTEENTH: 'sixteenth'
 };
 
 // Predefined sequences (durations in ms at 90 BPM reference tempo)
@@ -200,30 +201,11 @@ function parseMusicXMLPart(doc, partId) {
     measures.forEach(measure => {
         const noteEls = measure.querySelectorAll('note');
         noteEls.forEach(noteEl => {
-            // Skip rests
-            if (noteEl.querySelector('rest')) return;
-
             // Skip chord notes (only take the first note of a chord)
             if (noteEl.querySelector('chord')) return;
 
-            // Get pitch
-            const pitchEl = noteEl.querySelector('pitch');
-            if (!pitchEl) return;
-
-            const step = pitchEl.querySelector('step')?.textContent || 'C';
-            const octave = parseInt(pitchEl.querySelector('octave')?.textContent || '4');
-            const alter = parseInt(pitchEl.querySelector('alter')?.textContent || '0');
-
-            // Convert alter to sharp/flat
-            let noteName = step;
-            if (alter === 1) noteName += '#';
-            else if (alter === -1) {
-                // Convert flat to equivalent sharp
-                const flatToSharp = { 'D': 'C#', 'E': 'D#', 'G': 'F#', 'A': 'G#', 'B': 'A#' };
-                if (flatToSharp[step]) {
-                    noteName = flatToSharp[step];
-                }
-            }
+            // Check if this is a rest
+            const isRest = noteEl.querySelector('rest') !== null;
 
             // Get duration
             const durationEl = noteEl.querySelector('duration');
@@ -244,17 +226,48 @@ function parseMusicXMLPart(doc, partId) {
                 case 'half': noteType = NOTE_TYPES.HALF; break;
                 case 'quarter': noteType = NOTE_TYPES.QUARTER; break;
                 case 'eighth': noteType = NOTE_TYPES.EIGHTH; break;
-                case '16th': noteType = NOTE_TYPES.EIGHTH; break; // Treat 16th as eighth for now
+                case '16th': noteType = NOTE_TYPES.SIXTEENTH; break;
+                case '32nd': noteType = NOTE_TYPES.SIXTEENTH; break; // Treat 32nd as 16th
                 default: noteType = NOTE_TYPES.QUARTER;
             }
 
-            notes.push({
-                note: noteName,
-                octave: octave,
-                duration: durationMs,
-                noteType: noteType,
-                dotted: dotted
-            });
+            if (isRest) {
+                // Add rest with no pitch info
+                notes.push({
+                    isRest: true,
+                    duration: durationMs,
+                    noteType: noteType,
+                    dotted: dotted
+                });
+            } else {
+                // Get pitch
+                const pitchEl = noteEl.querySelector('pitch');
+                if (!pitchEl) return;
+
+                const step = pitchEl.querySelector('step')?.textContent || 'C';
+                const octave = parseInt(pitchEl.querySelector('octave')?.textContent || '4');
+                const alter = parseInt(pitchEl.querySelector('alter')?.textContent || '0');
+
+                // Convert alter to sharp/flat
+                let noteName = step;
+                if (alter === 1) noteName += '#';
+                else if (alter === -1) {
+                    // Convert flat to equivalent sharp
+                    const flatToSharp = { 'D': 'C#', 'E': 'D#', 'G': 'F#', 'A': 'G#', 'B': 'A#' };
+                    if (flatToSharp[step]) {
+                        noteName = flatToSharp[step];
+                    }
+                }
+
+                notes.push({
+                    note: noteName,
+                    octave: octave,
+                    duration: durationMs,
+                    noteType: noteType,
+                    dotted: dotted,
+                    isRest: false
+                });
+            }
         });
     });
 
@@ -291,7 +304,9 @@ const sequenceState = {
     // Time signature for beat calculation (from MusicXML or default 4/4)
     timeSignature: { beats: 4, beatType: 4 },
     // Source tempo - the BPM at which durations were calculated (90 for built-in, from file for MusicXML)
-    sourceTempo: 90
+    sourceTempo: 90,
+    // Whether to show the final pitch trace (persists after song ends until next action)
+    showFinalTrace: false
 };
 
 // Preview scroll animation state - uses shared scroll utilities
@@ -896,7 +911,12 @@ sheetMusicCanvas.addEventListener('mousemove', (e) => {
 
     const deltaX = userScrollState.startX - e.clientX;
     userScrollState.offset = Math.max(0, Math.min(userScrollState.maxOffset, userScrollState.startOffset + deltaX));
-    drawSheetMusic(-1, -1);
+    // Preserve final trace when scrolling after song ends
+    if (sequenceState.showFinalTrace) {
+        drawSheetMusic(-1, -1, sequenceState.noteScores, -1, true);
+    } else {
+        drawSheetMusic(-1, -1);
+    }
 });
 
 sheetMusicCanvas.addEventListener('mouseup', () => {
@@ -928,7 +948,12 @@ sheetMusicCanvas.addEventListener('touchmove', (e) => {
 
     const deltaX = userScrollState.startX - e.touches[0].clientX;
     userScrollState.offset = Math.max(0, Math.min(userScrollState.maxOffset, userScrollState.startOffset + deltaX));
-    drawSheetMusic(-1, -1);
+    // Preserve final trace when scrolling after song ends
+    if (sequenceState.showFinalTrace) {
+        drawSheetMusic(-1, -1, sequenceState.noteScores, -1, true);
+    } else {
+        drawSheetMusic(-1, -1);
+    }
 }, { passive: true });
 
 sheetMusicCanvas.addEventListener('touchend', () => {
@@ -942,7 +967,12 @@ sheetMusicCanvas.addEventListener('wheel', (e) => {
 
     e.preventDefault();
     userScrollState.offset = Math.max(0, Math.min(userScrollState.maxOffset, userScrollState.offset + e.deltaX + e.deltaY));
-    drawSheetMusic(-1, -1);
+    // Preserve final trace when scrolling after song ends
+    if (sequenceState.showFinalTrace) {
+        drawSheetMusic(-1, -1, sequenceState.noteScores, -1, true);
+    } else {
+        drawSheetMusic(-1, -1);
+    }
 }, { passive: false });
 
 const previewBtn = document.getElementById('preview-btn');
@@ -1037,6 +1067,9 @@ function semitoneToNote(semitone) {
 function loadSequence(id) {
     const seq = sequences[id];
     if (!seq || seq.notes.length === 0) return;
+
+    // Clear final trace when loading a new sequence
+    sequenceState.showFinalTrace = false;
 
     // Get the original starting note and the user's selected starting note
     const originalStart = seq.notes[0];
@@ -1140,10 +1173,12 @@ function getStaffPosition(note, octave) {
 
 // Determine best clef for a sequence
 function getBestClef(sequence) {
-    if (sequence.length === 0) return 'treble';
+    // Filter out rests since they don't have pitch information
+    const pitchedNotes = sequence.filter(n => !n.isRest);
+    if (pitchedNotes.length === 0) return 'treble';
 
     // Calculate average staff position
-    const avgPosition = sequence.reduce((sum, n) => sum + getStaffPosition(n.note, n.octave), 0) / sequence.length;
+    const avgPosition = pitchedNotes.reduce((sum, n) => sum + getStaffPosition(n.note, n.octave), 0) / pitchedNotes.length;
 
     // Middle C (C4) is at position 28
     // Use treble if average is >= C4, bass otherwise
@@ -1253,7 +1288,8 @@ function drawNote(ctx, x, y, isSharp, isActive, isCompleted, staffMiddleY, score
     // Determine if note head should be filled or hollow
     const isHollow = noteType === NOTE_TYPES.WHOLE || noteType === NOTE_TYPES.HALF;
     const hasStem = noteType !== NOTE_TYPES.WHOLE;
-    const hasFlag = noteType === NOTE_TYPES.EIGHTH;
+    const hasFlag = noteType === NOTE_TYPES.EIGHTH || noteType === NOTE_TYPES.SIXTEENTH;
+    const hasDoubleFlag = noteType === NOTE_TYPES.SIXTEENTH;
 
     // Stem direction: down if on or above middle line, up if below
     const stemDown = y <= staffMiddleY;
@@ -1282,7 +1318,7 @@ function drawNote(ctx, x, y, isSharp, isActive, isCompleted, staffMiddleY, score
             // Stem down (on left side of note)
             ctx.fillRect(x - noteWidth + 1, y, stemWidth, stemHeight);
 
-            // Draw flag for eighth note (stem down)
+            // Draw flag(s) for eighth/sixteenth note (stem down)
             if (hasFlag) {
                 ctx.beginPath();
                 ctx.moveTo(x - noteWidth + 1 + stemWidth, y + stemHeight);
@@ -1292,12 +1328,23 @@ function drawNote(ctx, x, y, isSharp, isActive, isCompleted, staffMiddleY, score
                 );
                 ctx.lineWidth = 2;
                 ctx.stroke();
+
+                // Second flag for sixteenth note
+                if (hasDoubleFlag) {
+                    ctx.beginPath();
+                    ctx.moveTo(x - noteWidth + 1 + stemWidth, y + stemHeight - 6);
+                    ctx.quadraticCurveTo(
+                        x - noteWidth + 15, y + stemHeight - 11,
+                        x - noteWidth + 12, y + stemHeight - 21
+                    );
+                    ctx.stroke();
+                }
             }
         } else {
             // Stem up (on right side of note)
             ctx.fillRect(x + noteWidth - stemWidth - 1, y - stemHeight, stemWidth, stemHeight);
 
-            // Draw flag for eighth note (stem up)
+            // Draw flag(s) for eighth/sixteenth note (stem up)
             if (hasFlag) {
                 ctx.beginPath();
                 ctx.moveTo(x + noteWidth - 1, y - stemHeight);
@@ -1307,6 +1354,17 @@ function drawNote(ctx, x, y, isSharp, isActive, isCompleted, staffMiddleY, score
                 );
                 ctx.lineWidth = 2;
                 ctx.stroke();
+
+                // Second flag for sixteenth note
+                if (hasDoubleFlag) {
+                    ctx.beginPath();
+                    ctx.moveTo(x + noteWidth - 1, y - stemHeight + 6);
+                    ctx.quadraticCurveTo(
+                        x + noteWidth + 10, y - stemHeight + 11,
+                        x + noteWidth + 8, y - stemHeight + 21
+                    );
+                    ctx.stroke();
+                }
             }
         }
     }
@@ -1324,6 +1382,85 @@ function drawNote(ctx, x, y, isSharp, isActive, isCompleted, staffMiddleY, score
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText('♯', x - 16, y);
+    }
+
+    ctx.restore();
+}
+
+// Draw a rest symbol
+function drawRest(ctx, x, staffTop, lineSpacing, isActive, isCompleted, noteType = NOTE_TYPES.QUARTER, dotted = false) {
+    ctx.save();
+
+    // Set color based on state
+    if (isActive) {
+        ctx.fillStyle = '#4ecdc4';
+        ctx.strokeStyle = '#4ecdc4';
+    } else if (isCompleted) {
+        ctx.fillStyle = 'rgba(78, 205, 196, 0.5)';
+        ctx.strokeStyle = 'rgba(78, 205, 196, 0.5)';
+    } else {
+        ctx.fillStyle = '#fff';
+        ctx.strokeStyle = '#fff';
+    }
+
+    ctx.lineWidth = 2;
+    const staffMiddleY = staffTop + 2 * lineSpacing;
+
+    if (noteType === NOTE_TYPES.WHOLE) {
+        // Whole rest: rectangle hanging below the 4th line (2nd from top)
+        const restY = staffTop + lineSpacing;
+        ctx.fillRect(x - 6, restY, 12, 5);
+    } else if (noteType === NOTE_TYPES.HALF) {
+        // Half rest: rectangle sitting on the middle line
+        const restY = staffMiddleY - 5;
+        ctx.fillRect(x - 6, restY, 12, 5);
+    } else if (noteType === NOTE_TYPES.QUARTER) {
+        // Quarter rest: squiggly shape
+        ctx.beginPath();
+        ctx.moveTo(x + 3, staffTop + lineSpacing * 0.5);
+        ctx.lineTo(x - 3, staffTop + lineSpacing * 1.2);
+        ctx.lineTo(x + 3, staffTop + lineSpacing * 2);
+        ctx.lineTo(x - 2, staffTop + lineSpacing * 2.8);
+        ctx.quadraticCurveTo(x + 5, staffTop + lineSpacing * 3, x + 2, staffTop + lineSpacing * 3.7);
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+    } else if (noteType === NOTE_TYPES.EIGHTH) {
+        // Eighth rest: diagonal line with one flag
+        const startY = staffTop + lineSpacing;
+        ctx.beginPath();
+        // Dot/flag at top
+        ctx.arc(x + 2, startY + 2, 3, 0, 2 * Math.PI);
+        ctx.fill();
+        // Diagonal stem
+        ctx.beginPath();
+        ctx.moveTo(x + 2, startY + 4);
+        ctx.lineTo(x - 3, startY + lineSpacing * 2);
+        ctx.lineWidth = 2;
+        ctx.stroke();
+    } else if (noteType === NOTE_TYPES.SIXTEENTH) {
+        // Sixteenth rest: diagonal line with two flags
+        const startY = staffTop + lineSpacing * 0.5;
+        // First dot/flag
+        ctx.beginPath();
+        ctx.arc(x + 2, startY + 2, 3, 0, 2 * Math.PI);
+        ctx.fill();
+        // Second dot/flag
+        ctx.beginPath();
+        ctx.arc(x + 1, startY + lineSpacing + 2, 3, 0, 2 * Math.PI);
+        ctx.fill();
+        // Diagonal stem
+        ctx.beginPath();
+        ctx.moveTo(x + 1, startY + lineSpacing + 4);
+        ctx.lineTo(x - 4, startY + lineSpacing * 2.5);
+        ctx.lineWidth = 2;
+        ctx.stroke();
+    }
+
+    // Draw dot for dotted rests
+    if (dotted) {
+        ctx.beginPath();
+        ctx.arc(x + 10, staffMiddleY, 2, 0, 2 * Math.PI);
+        ctx.fill();
     }
 
     ctx.restore();
@@ -1598,18 +1735,24 @@ function drawSheetMusic(activeIndex = -1, completedUpTo = -1, noteScores = null,
         // Skip notes that are past the left edge of the staff or off-screen right
         if (x < clipLeftEdge || x > width + 20) continue;
 
-        const staffPos = getStaffPosition(note.note, note.octave);
-        const y = getYForStaffPosition(staffPos, clef, staffTop, lineSpacing);
-        const isSharp = note.note.includes('#');
         const isActive = i === activeIndex;
         const isCompleted = i < completedUpTo;
-        const score = noteScores && noteScores[i] ? noteScores[i].score : null;
 
-        // Draw ledger lines if needed
-        drawLedgerLines(ctx, x, y, staffTop, lineSpacing, clef);
+        if (note.isRest) {
+            // Draw rest symbol
+            drawRest(ctx, x, staffTop, lineSpacing, isActive, isCompleted, note.noteType || NOTE_TYPES.QUARTER, note.dotted || false);
+        } else {
+            const staffPos = getStaffPosition(note.note, note.octave);
+            const y = getYForStaffPosition(staffPos, clef, staffTop, lineSpacing);
+            const isSharp = note.note.includes('#');
+            const score = noteScores && noteScores[i] ? noteScores[i].score : null;
 
-        // Draw the note
-        drawNote(ctx, x, y, isSharp, isActive, isCompleted, staffMiddleY, score, note.noteType || NOTE_TYPES.QUARTER, note.dotted || false);
+            // Draw ledger lines if needed
+            drawLedgerLines(ctx, x, y, staffTop, lineSpacing, clef);
+
+            // Draw the note
+            drawNote(ctx, x, y, isSharp, isActive, isCompleted, staffMiddleY, score, note.noteType || NOTE_TYPES.QUARTER, note.dotted || false);
+        }
     }
 
     // Draw scroll indicators if song is scrollable in idle mode
@@ -1640,7 +1783,9 @@ function drawSheetMusic(activeIndex = -1, completedUpTo = -1, noteScores = null,
             ? getPlaybackProgress(playbackTime, scrollParams)
             : { scrollOffset: 0, playheadX: notesStartX, naturalPlayheadX: notesStartX };
 
-        let scrollOffset = hasEllipsis ? progress.scrollOffset : 0;
+        // For final trace in idle mode, use the same scroll offset as the notes
+        // Otherwise the pitch trace would be misaligned with the notes
+        let scrollOffset = showFinalTrace && isIdleMode ? idleScrollOffset : (hasEllipsis ? progress.scrollOffset : 0);
         let playheadX = hasEllipsis ? progress.playheadX : progress.naturalPlayheadX;
 
         // Redraw notes with scroll offset during playback
@@ -1674,15 +1819,20 @@ function drawSheetMusic(activeIndex = -1, completedUpTo = -1, noteScores = null,
                 // Skip notes that are past the left edge of the staff or off-screen right
                 if (x < clipLeftEdge || x > width + 20) continue;
 
-                const staffPos = getStaffPosition(note.note, note.octave);
-                const y = getYForStaffPosition(staffPos, clef, staffTop, lineSpacing);
-                const isSharp = note.note.includes('#');
                 const isActive = i === activeIndex;
                 const isCompleted = i < completedUpTo;
-                const score = noteScores && noteScores[i] ? noteScores[i].score : null;
 
-                drawLedgerLines(ctx, x, y, staffTop, lineSpacing, clef);
-                drawNote(ctx, x, y, isSharp, isActive, isCompleted, staffMiddleY, score, note.noteType || NOTE_TYPES.QUARTER, note.dotted || false);
+                if (note.isRest) {
+                    drawRest(ctx, x, staffTop, lineSpacing, isActive, isCompleted, note.noteType || NOTE_TYPES.QUARTER, note.dotted || false);
+                } else {
+                    const staffPos = getStaffPosition(note.note, note.octave);
+                    const y = getYForStaffPosition(staffPos, clef, staffTop, lineSpacing);
+                    const isSharp = note.note.includes('#');
+                    const score = noteScores && noteScores[i] ? noteScores[i].score : null;
+
+                    drawLedgerLines(ctx, x, y, staffTop, lineSpacing, clef);
+                    drawNote(ctx, x, y, isSharp, isActive, isCompleted, staffMiddleY, score, note.noteType || NOTE_TYPES.QUARTER, note.dotted || false);
+                }
             }
         }
 
@@ -1692,37 +1842,23 @@ function drawSheetMusic(activeIndex = -1, completedUpTo = -1, noteScores = null,
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
 
+            // Helper to get X position for a time, using the same calculation as the playhead
+            // This ensures consistency between playhead and pitch trace positioning
+            function getTraceX(time) {
+                // Use getPlaybackProgress for consistent time-to-X mapping
+                const traceProgress = getPlaybackProgress(time, scrollParams);
+                // Apply the same scroll offset adjustment as used for playhead display
+                return traceProgress.naturalPlayheadX - scrollOffset;
+            }
+
             // Draw trace segments
             for (let i = 1; i < sequenceState.globalPitchTrace.length; i++) {
                 const prev = sequenceState.globalPitchTrace[i - 1];
                 const curr = sequenceState.globalPitchTrace[i];
 
-                // Calculate X positions for both points (apply scroll offset)
-                let prevX = notesStartX - scrollOffset, currX = notesStartX - scrollOffset;
-
-                for (let j = 0; j < notePositions.length; j++) {
-                    const pos = notePositions[j];
-                    // Previous point
-                    if (prev.time >= pos.startTime && prev.time < pos.endTime) {
-                        const progress = (prev.time - pos.startTime) / pos.duration;
-                        const nextX = (j < notePositions.length - 1) ? notePositions[j + 1].x : pos.x + pos.spacing;
-                        prevX = pos.x + progress * (nextX - pos.x) - scrollOffset;
-                    } else if (prev.time >= pos.endTime) {
-                        // Point is past this note, update to end of this note
-                        const nextX = (j < notePositions.length - 1) ? notePositions[j + 1].x : pos.x + pos.spacing;
-                        prevX = nextX - scrollOffset;
-                    }
-                    // Current point
-                    if (curr.time >= pos.startTime && curr.time < pos.endTime) {
-                        const progress = (curr.time - pos.startTime) / pos.duration;
-                        const nextX = (j < notePositions.length - 1) ? notePositions[j + 1].x : pos.x + pos.spacing;
-                        currX = pos.x + progress * (nextX - pos.x) - scrollOffset;
-                    } else if (curr.time >= pos.endTime) {
-                        // Point is past this note, update to end of this note
-                        const nextX = (j < notePositions.length - 1) ? notePositions[j + 1].x : pos.x + pos.spacing;
-                        currX = nextX - scrollOffset;
-                    }
-                }
+                // Calculate X positions using the same logic as the playhead
+                const prevX = getTraceX(prev.time);
+                const currX = getTraceX(curr.time);
 
                 // Calculate Y positions based on detected frequency
                 const prevY = frequencyToStaffY(prev.frequency, clef, staffTop, lineSpacing);
@@ -1807,6 +1943,8 @@ function previewSequence() {
 
     // Reset user scroll offset when starting preview
     userScrollState.offset = 0;
+    // Clear final trace display
+    sequenceState.showFinalTrace = false;
 
     sequenceState.isPreviewing = true;
     sequenceState.previewIndex = 0;
@@ -1845,10 +1983,18 @@ function previewSequence() {
         // Sync visual to this note starting
         onPreviewNoteStart(index, durationMs);
 
-        playTone(note.frequency, durationSec, () => {
-            index++;
-            playNext();
-        });
+        if (note.isRest) {
+            // For rests, just wait the duration without playing a tone
+            setTimeout(() => {
+                index++;
+                playNext();
+            }, durationMs);
+        } else {
+            playTone(note.frequency, durationSec, () => {
+                index++;
+                playNext();
+            });
+        }
     }
 
     playNext();
@@ -1880,6 +2026,8 @@ async function startSequence() {
         sequenceState.timeOnPitch = 0;
         recentPitches.length = 0;
         userScrollState.offset = 0;
+        // Clear final trace display from previous run
+        sequenceState.showFinalTrace = false;
 
         previewBtn.disabled = true;
         goBtn.textContent = 'Stop';
@@ -2202,35 +2350,39 @@ function analyzeSequence(timestamp) {
         triggerBeatPulse();
     }
 
-    // Sample pitch at fixed rate
+    // Sample pitch at fixed rate (skip during rests)
     if (timestamp - lastSequenceSampleTime >= sequenceSampleInterval) {
         lastSequenceSampleTime = timestamp;
 
         const currentNote = sequenceState.currentSequence[sequenceState.currentNoteIndex];
-        const buffer = new Float32Array(analyser.fftSize);
-        analyser.getFloatTimeDomainData(buffer);
 
-        const rawPitch = detectPitch(buffer, audioContext.sampleRate);
+        // Skip pitch detection during rests
+        if (!currentNote.isRest) {
+            const buffer = new Float32Array(analyser.fftSize);
+            analyser.getFloatTimeDomainData(buffer);
 
-        if (rawPitch !== -1 && rawPitch > 80 && rawPitch < 1000) {
-            const pitch = getSmoothedPitch(rawPitch);
-            const cents = getCentsDifference(pitch, currentNote.frequency);
-            sequenceState.pitchSamplesForNote.push(cents);
-            sequenceState.pitchHistory.push(cents);
+            const rawPitch = detectPitch(buffer, audioContext.sampleRate);
 
-            // Add to global pitch trace for integrated visualization
-            sequenceState.globalPitchTrace.push({
-                time: playbackTime,
-                frequency: pitch,
-                noteIndex: sequenceState.currentNoteIndex,
-                cents: cents
-            });
+            if (rawPitch !== -1 && rawPitch > 80 && rawPitch < 1000) {
+                const pitch = getSmoothedPitch(rawPitch);
+                const cents = getCentsDifference(pitch, currentNote.frequency);
+                sequenceState.pitchSamplesForNote.push(cents);
+                sequenceState.pitchHistory.push(cents);
 
-            if (Math.abs(cents) <= 50) {
-                sequenceState.timeOnPitch += sequenceSampleInterval;
+                // Add to global pitch trace for integrated visualization
+                sequenceState.globalPitchTrace.push({
+                    time: playbackTime,
+                    frequency: pitch,
+                    noteIndex: sequenceState.currentNoteIndex,
+                    cents: cents
+                });
+
+                if (Math.abs(cents) <= 50) {
+                    sequenceState.timeOnPitch += sequenceSampleInterval;
+                }
+            } else {
+                sequenceState.pitchHistory.push(null);
             }
-        } else {
-            sequenceState.pitchHistory.push(null);
         }
     }
 
@@ -2244,6 +2396,20 @@ function analyzeSequence(timestamp) {
 function finalizeCurrentNote() {
     const currentNote = sequenceState.currentSequence[sequenceState.currentNoteIndex];
     const adjustedDuration = getAdjustedDuration(currentNote.duration);
+
+    // Rests don't get scored - just mark as complete
+    if (currentNote.isRest) {
+        sequenceState.noteScores.push({
+            note: 'rest',
+            isRest: true,
+            score: 100, // Rests are always "perfect"
+            avgCents: 0,
+            timeOnPitch: adjustedDuration,
+            totalTime: currentNote.duration
+        });
+        return;
+    }
+
     const score = calculateNoteScore(
         sequenceState.pitchSamplesForNote,
         sequenceState.timeOnPitch,
@@ -2295,9 +2461,14 @@ function calculateNoteScore(pitchSamples, timeOnPitch, totalTime) {
 function finishSequence() {
     stopSequence();
 
-    const totalScore = sequenceState.noteScores.reduce((a, b) => a + b.score, 0);
-    const maxScore = sequenceState.noteScores.length * 100;
-    const percentage = Math.round((totalScore / maxScore) * 100);
+    // Filter out rests for grading - only score actual pitched notes
+    const pitchedNoteScores = sequenceState.noteScores
+        .map((ns, i) => ({ ...ns, originalIndex: i }))
+        .filter(ns => !ns.isRest);
+
+    const totalScore = pitchedNoteScores.reduce((a, b) => a + b.score, 0);
+    const maxScore = pitchedNoteScores.length * 100;
+    const percentage = maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : 100;
 
     let grade;
     if (percentage >= 85) grade = 'A';
@@ -2310,11 +2481,12 @@ function finishSequence() {
     resultsGrade.className = `results-grade grade-${grade.toLowerCase()}`;
     resultsPercent.textContent = `${percentage}%`;
 
-    resultsBreakdown.innerHTML = sequenceState.noteScores.map((ns, i) => {
+    // Only show pitched notes in breakdown (not rests)
+    resultsBreakdown.innerHTML = pitchedNoteScores.map((ns) => {
         const scoreClass = ns.score >= 70 ? 'score-high' : ns.score >= 40 ? 'score-mid' : 'score-low';
         return `
             <div class="breakdown-item">
-                <canvas class="breakdown-mini-staff" data-note-index="${i}" width="105" height="45"></canvas>
+                <canvas class="breakdown-mini-staff" data-note-index="${ns.originalIndex}" width="105" height="45"></canvas>
                 <div class="breakdown-score">
                     <div class="breakdown-bar">
                         <div class="breakdown-fill ${scoreClass}" style="width: ${ns.score}%"></div>
@@ -2335,6 +2507,9 @@ function finishSequence() {
 
     sequenceResults.style.display = '';
     sequenceCanvasContainer.classList.remove('active');
+
+    // Persist final trace display until next action
+    sequenceState.showFinalTrace = true;
 
     // Draw sheet music with performance-based coloring and final pitch trace
     drawSheetMusic(-1, -1, sequenceState.noteScores, -1, true);
@@ -2928,9 +3103,18 @@ function drawBreakdownMiniStaff(canvas, sequence, noteIndex, noteScore) {
     const leftMargin = 3;
     const noteSpacing = 20;
 
-    // Determine clef based on current note
-    const staffPos = getStaffPosition(currentNote.note, currentNote.octave);
-    const clef = staffPos >= 28 ? 'treble' : 'bass';
+    // Determine clef based on current note (use treble for rests, or look at adjacent notes)
+    let clef = 'treble';
+    if (!currentNote.isRest) {
+        const staffPos = getStaffPosition(currentNote.note, currentNote.octave);
+        clef = staffPos >= 28 ? 'treble' : 'bass';
+    } else if (prevNote && !prevNote.isRest) {
+        const staffPos = getStaffPosition(prevNote.note, prevNote.octave);
+        clef = staffPos >= 28 ? 'treble' : 'bass';
+    } else if (nextNote && !nextNote.isRest) {
+        const staffPos = getStaffPosition(nextNote.note, nextNote.octave);
+        clef = staffPos >= 28 ? 'treble' : 'bass';
+    }
     const staffMiddleY = staffTop + 2 * lineSpacing;
 
     // Draw staff lines
@@ -3011,7 +3195,8 @@ function drawBreakdownMiniStaff(canvas, sequence, noteIndex, noteScore) {
         const stemHeight = 16;
         const isHollow = noteType === NOTE_TYPES.WHOLE || noteType === NOTE_TYPES.HALF;
         const hasStem = noteType !== NOTE_TYPES.WHOLE;
-        const hasFlag = noteType === NOTE_TYPES.EIGHTH;
+        const hasFlag = noteType === NOTE_TYPES.EIGHTH || noteType === NOTE_TYPES.SIXTEENTH;
+        const hasDoubleFlag = noteType === NOTE_TYPES.SIXTEENTH;
         const stemDown = y <= staffMiddleY;
 
         // Draw note head
@@ -3036,12 +3221,18 @@ function drawBreakdownMiniStaff(canvas, sequence, noteIndex, noteScore) {
                 ctx.moveTo(x - noteWidth + 1, y);
                 ctx.lineTo(x - noteWidth + 1, y + stemHeight);
                 ctx.stroke();
-                // Flag for eighth notes
+                // Flag(s) for eighth/sixteenth notes
                 if (hasFlag) {
                     ctx.beginPath();
                     ctx.moveTo(x - noteWidth + 1, y + stemHeight);
                     ctx.quadraticCurveTo(x + 2, y + stemHeight - 4, x + 4, y + stemHeight - 10);
                     ctx.stroke();
+                    if (hasDoubleFlag) {
+                        ctx.beginPath();
+                        ctx.moveTo(x - noteWidth + 1, y + stemHeight - 4);
+                        ctx.quadraticCurveTo(x + 2, y + stemHeight - 8, x + 4, y + stemHeight - 14);
+                        ctx.stroke();
+                    }
                 }
             } else {
                 ctx.beginPath();
@@ -3053,6 +3244,12 @@ function drawBreakdownMiniStaff(canvas, sequence, noteIndex, noteScore) {
                     ctx.moveTo(x + noteWidth - 1, y - stemHeight);
                     ctx.quadraticCurveTo(x + 6, y - stemHeight + 4, x + 8, y - stemHeight + 10);
                     ctx.stroke();
+                    if (hasDoubleFlag) {
+                        ctx.beginPath();
+                        ctx.moveTo(x + noteWidth - 1, y - stemHeight + 4);
+                        ctx.quadraticCurveTo(x + 6, y - stemHeight + 8, x + 8, y - stemHeight + 14);
+                        ctx.stroke();
+                    }
                 }
             }
         }
@@ -3075,16 +3272,89 @@ function drawBreakdownMiniStaff(canvas, sequence, noteIndex, noteScore) {
         ctx.restore();
     }
 
+    // Helper to draw a mini rest
+    function drawMiniRest(note, x, alpha, scoreValue) {
+        const noteType = note.noteType || NOTE_TYPES.QUARTER;
+        const dotted = note.dotted || false;
+
+        ctx.save();
+        ctx.globalAlpha = alpha;
+
+        // Determine color (rests are always "perfect" so use green if scored)
+        let restColor;
+        if (scoreValue !== null) {
+            restColor = '#6bcb77'; // Always green for rests
+        } else {
+            restColor = '#666';
+        }
+        ctx.fillStyle = restColor;
+        ctx.strokeStyle = restColor;
+
+        // Draw rest symbol (scaled down versions)
+        if (noteType === NOTE_TYPES.WHOLE) {
+            ctx.fillRect(x - 4, staffTop + lineSpacing, 8, 3);
+        } else if (noteType === NOTE_TYPES.HALF) {
+            ctx.fillRect(x - 4, staffMiddleY - 3, 8, 3);
+        } else if (noteType === NOTE_TYPES.QUARTER) {
+            ctx.beginPath();
+            ctx.moveTo(x + 2, staffTop + lineSpacing * 0.8);
+            ctx.lineTo(x - 2, staffTop + lineSpacing * 1.4);
+            ctx.lineTo(x + 2, staffTop + lineSpacing * 2);
+            ctx.lineTo(x - 1, staffTop + lineSpacing * 2.6);
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+        } else if (noteType === NOTE_TYPES.EIGHTH) {
+            ctx.beginPath();
+            ctx.arc(x + 1, staffTop + lineSpacing + 1, 2, 0, 2 * Math.PI);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(x + 1, staffTop + lineSpacing + 2);
+            ctx.lineTo(x - 2, staffTop + lineSpacing * 2);
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+        } else if (noteType === NOTE_TYPES.SIXTEENTH) {
+            ctx.beginPath();
+            ctx.arc(x + 1, staffTop + lineSpacing * 0.7, 2, 0, 2 * Math.PI);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(x, staffTop + lineSpacing * 1.3, 2, 0, 2 * Math.PI);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(x, staffTop + lineSpacing * 1.5);
+            ctx.lineTo(x - 2, staffTop + lineSpacing * 2.2);
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+        }
+
+        // Draw dot
+        if (dotted) {
+            ctx.beginPath();
+            ctx.arc(x + 6, staffMiddleY, 1.5, 0, 2 * Math.PI);
+            ctx.fill();
+        }
+
+        ctx.restore();
+    }
+
+    // Helper to draw note or rest
+    function drawMiniNoteOrRest(note, x, alpha, scoreValue) {
+        if (note.isRest) {
+            drawMiniRest(note, x, alpha, scoreValue);
+        } else {
+            drawMiniNote(note, x, alpha, scoreValue);
+        }
+    }
+
     // Draw context notes first (faded, no score coloring)
     if (prevNote) {
-        drawMiniNote(prevNote, prevX, 0.5, null);
+        drawMiniNoteOrRest(prevNote, prevX, 0.5, null);
     }
     if (nextNote) {
-        drawMiniNote(nextNote, nextX, 0.5, null);
+        drawMiniNoteOrRest(nextNote, nextX, 0.5, null);
     }
 
     // Draw main note (full opacity, colored by score)
-    drawMiniNote(currentNote, centerX, 1.0, noteScore);
+    drawMiniNoteOrRest(currentNote, centerX, 1.0, noteScore);
 
     // Draw pitch trace for this note
     const noteSamples = sequenceState.globalPitchTrace.filter(s => s.noteIndex === noteIndex);

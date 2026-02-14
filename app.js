@@ -72,6 +72,11 @@ import {
     createCountdownBuffer
 } from './js/audio/index.js';
 
+import {
+    loadPreferences,
+    savePreference
+} from './js/storage/index.js';
+
 // Legacy alias for backward compatibility within this file
 const noteNames = NOTE_NAMES;
 
@@ -362,6 +367,10 @@ function updateCurrentNote() {
     noteNameEl.textContent = currentNote.name;
     noteFreqEl.textContent = `${Math.round(frequency)} Hz`;
     targetNoteLabelEl.textContent = currentNote.name;
+
+    // Save free practice note preference
+    savePreference('freeNote', note);
+    savePreference('freeOctave', octave);
 }
 
 // Event listeners
@@ -509,6 +518,49 @@ const beatIndicator = document.getElementById('beat-indicator');
 // Sequence configuration state
 let tempoBPM = 90;
 
+// Load and apply stored preferences on startup
+function applyStoredPreferences() {
+    const prefs = loadPreferences();
+
+    // Apply free practice note
+    if (noteSelect && prefs.freeNote) {
+        noteSelect.value = prefs.freeNote;
+    }
+    if (octaveSelect && prefs.freeOctave) {
+        octaveSelect.value = prefs.freeOctave.toString();
+    }
+
+    // Apply song practice note
+    if (startNoteSelect && prefs.songNote) {
+        startNoteSelect.value = prefs.songNote;
+    }
+    if (startOctaveSelect && prefs.songOctave) {
+        startOctaveSelect.value = prefs.songOctave.toString();
+    }
+
+    // Apply selected sequence
+    if (sequenceSelect && prefs.selectedSequence) {
+        // Only apply if the sequence exists
+        const option = sequenceSelect.querySelector(`option[value="${prefs.selectedSequence}"]`);
+        if (option) {
+            sequenceSelect.value = prefs.selectedSequence;
+        }
+    }
+
+    // Apply tempo
+    if (prefs.tempo && tempoSlider && tempoDisplay) {
+        tempoBPM = prefs.tempo;
+        tempoSlider.value = prefs.tempo.toString();
+        tempoDisplay.textContent = prefs.tempo.toString();
+    }
+
+    // Note: Mode is applied after DOM is ready via setMode()
+    return prefs;
+}
+
+// Apply preferences immediately
+const storedPrefs = applyStoredPreferences();
+
 // Beat indicator animation
 let beatIndicatorInterval = null;
 
@@ -559,6 +611,7 @@ function setMode(mode) {
         }
         loadSequence(sequenceSelect.value);
     }
+    savePreference('mode', mode);
 }
 
 // Load sequence with transposition based on selected starting note
@@ -1781,6 +1834,7 @@ sequenceSelect.addEventListener('change', () => {
 
     if (!isCustom) {
         loadSequence(sequenceSelect.value);
+        savePreference('selectedSequence', sequenceSelect.value);
     } else {
         // Clear sheet music if no custom sequence loaded yet
         if (sequences['custom'].notes.length === 0) {
@@ -1794,10 +1848,12 @@ sequenceSelect.addEventListener('change', () => {
 
 startNoteSelect.addEventListener('change', () => {
     loadSequence(sequenceSelect.value);
+    savePreference('songNote', startNoteSelect.value);
 });
 
 startOctaveSelect.addEventListener('change', () => {
     loadSequence(sequenceSelect.value);
+    savePreference('songOctave', parseInt(startOctaveSelect.value));
 });
 
 // Tempo control
@@ -1810,6 +1866,11 @@ tempoSlider.addEventListener('input', () => {
     }
     // Redraw sheet music (spacing is duration-based)
     drawSheetMusic();
+});
+
+// Save tempo when slider is released
+tempoSlider.addEventListener('change', () => {
+    savePreference('tempo', tempoBPM);
 });
 
 // Start beat indicator when user interacts with slider
@@ -1923,9 +1984,15 @@ function loadCustomSequence(notes, filename, timeSignature = null, tempo = 120) 
     }, 3000);
 }
 
-// Initialize with Song Practice mode (load default sequence)
+// Initialize with stored preferences
 setTimeout(() => {
-    loadSequence(sequenceSelect.value || 'simple-scale');
+    // Apply stored mode (default is 'song' if not stored)
+    if (storedPrefs.mode === 'free') {
+        setMode('free');
+    } else {
+        // Song mode is default, just load the sequence
+        loadSequence(sequenceSelect.value || 'simple-scale');
+    }
 }, 100);
 
 // ============================================

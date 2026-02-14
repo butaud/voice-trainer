@@ -51,6 +51,17 @@ import {
     drawMiniStaff
 } from './js/rendering/index.js';
 
+import {
+    getAudioContext,
+    warmUpAudio,
+    setupAudioWarmupListeners,
+    detectPitch,
+    getSmoothedPitch,
+    playTone,
+    getClickBuffer,
+    createCountdownBuffer
+} from './js/audio/index.js';
+
 // Legacy alias for backward compatibility within this file
 const noteNames = NOTE_NAMES;
 
@@ -137,203 +148,8 @@ const noteNameEl = document.getElementById('note-name');
 const noteFreqEl = document.getElementById('note-freq');
 const targetNoteLabelEl = document.getElementById('target-note-label');
 
-// Initialize audio context
-function getAudioContext() {
-    if (!audioState.context) {
-        audioState.context = new (window.AudioContext || window.webkitAudioContext)();
-    }
-    return audioState.context;
-}
-
-// Warm up audio context to avoid first-play lag - must be called from user gesture
-function warmUpAudio() {
-    if (audioState.warmedUp) return Promise.resolve();
-
-    const ctx = getAudioContext();
-
-    // Resume if suspended (required by Chrome autoplay policy)
-    const resumePromise = ctx.state === 'suspended' ? ctx.resume() : Promise.resolve();
-
-    return resumePromise.then(() => {
-        // Play a very short silent tone to prime the oscillator path
-        const oscillator = ctx.createOscillator();
-        const gainNode = ctx.createGain();
-        gainNode.gain.setValueAtTime(0, ctx.currentTime); // Silent
-        oscillator.connect(gainNode);
-        gainNode.connect(ctx.destination);
-        oscillator.start(ctx.currentTime);
-        oscillator.stop(ctx.currentTime + 0.01);
-
-        // Also prime the noise buffer path (used for click sounds)
-        // Pre-create the click buffer
-        const bufferSize = Math.floor(ctx.sampleRate * 0.02);
-        clickBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-        const data = clickBuffer.getChannelData(0);
-        for (let i = 0; i < bufferSize; i++) {
-            data[i] = Math.random() * 2 - 1;
-        }
-
-        // Play a silent click to prime the buffer source path
-        const noise = ctx.createBufferSource();
-        noise.buffer = clickBuffer;
-        const silentGain = ctx.createGain();
-        silentGain.gain.setValueAtTime(0, ctx.currentTime);
-        noise.connect(silentGain);
-        silentGain.connect(ctx.destination);
-        noise.start(ctx.currentTime);
-        noise.stop(ctx.currentTime + 0.01);
-
-        audioState.warmedUp = true;
-    });
-}
-
-// Warm up audio on first user click/touch/key (these are valid user gestures)
-function onFirstInteraction() {
-    warmUpAudio();
-    document.removeEventListener('click', onFirstInteraction);
-    document.removeEventListener('touchstart', onFirstInteraction);
-    document.removeEventListener('keydown', onFirstInteraction);
-}
-document.addEventListener('click', onFirstInteraction);
-document.addEventListener('touchstart', onFirstInteraction);
-document.addEventListener('keydown', onFirstInteraction);
-
-// Play reference tone - returns a stop function
-function playTone(frequency, duration = 1.5, callback = null) {
-    // Ensure audio is warmed up, then play
-    warmUpAudio().then(() => {
-        const ctx = getAudioContext();
-
-        const oscillator = ctx.createOscillator();
-        oscillator.type = 'sine';
-        oscillator.frequency.setValueAtTime(frequency, ctx.currentTime);
-
-        // Calculate volume with bass boost for lower frequencies
-        // Lower notes need more gain to sound equally loud (equal-loudness compensation)
-        const baseVolume = 0.9;
-        const bassBoost = frequency < 250 ? (250 - frequency) / 250 * 0.5 : 0;
-        const volume = Math.min(1.5, baseVolume + bassBoost);
-
-        const gainNode = ctx.createGain();
-        gainNode.gain.setValueAtTime(0, ctx.currentTime);
-        gainNode.gain.linearRampToValueAtTime(volume, ctx.currentTime + 0.05);
-        gainNode.gain.linearRampToValueAtTime(volume, ctx.currentTime + duration - 0.1);
-        gainNode.gain.linearRampToValueAtTime(0, ctx.currentTime + duration);
-
-        oscillator.connect(gainNode);
-        gainNode.connect(ctx.destination);
-
-        oscillator.start(ctx.currentTime);
-        oscillator.stop(ctx.currentTime + duration);
-
-        let timeoutId = null;
-        if (callback) {
-            timeoutId = setTimeout(callback, duration * 1000);
-            // Store reference for stopping preview
-            audioState.currentPreviewAudio = {
-                oscillator,
-                gainNode,
-                timeoutId,
-                stop: function() {
-                    if (this.timeoutId) clearTimeout(this.timeoutId);
-                    try {
-                        this.gainNode.gain.cancelScheduledValues(ctx.currentTime);
-                        this.gainNode.gain.setValueAtTime(0, ctx.currentTime);
-                        this.oscillator.stop(ctx.currentTime + 0.01);
-                    } catch (e) {
-                        // Oscillator may have already stopped
-                    }
-                }
-            };
-        } else {
-            playNoteBtn.disabled = true;
-            setTimeout(() => {
-                playNoteBtn.disabled = false;
-            }, duration * 1000);
-        }
-    });
-}
-
-// YIN pitch detection algorithm
-function detectPitch(buffer, sampleRate) {
-    const SIZE = buffer.length;
-    const MAX_SAMPLES = Math.floor(SIZE / 2);
-
-    // Find RMS
-    let rms = 0;
-    for (let i = 0; i < SIZE; i++) {
-        rms += buffer[i] * buffer[i];
-    }
-    rms = Math.sqrt(rms / SIZE);
-
-    if (rms < 0.005) {
-        return -1;
-    }
-
-    // Difference function
-    const diff = new Float32Array(MAX_SAMPLES);
-    for (let tau = 0; tau < MAX_SAMPLES; tau++) {
-        let sum = 0;
-        for (let i = 0; i < MAX_SAMPLES; i++) {
-            const delta = buffer[i] - buffer[i + tau];
-            sum += delta * delta;
-        }
-        diff[tau] = sum;
-    }
-
-    // Cumulative mean normalized difference
-    const cmndf = new Float32Array(MAX_SAMPLES);
-    cmndf[0] = 1;
-    let runningSum = 0;
-    for (let tau = 1; tau < MAX_SAMPLES; tau++) {
-        runningSum += diff[tau];
-        cmndf[tau] = diff[tau] / (runningSum / tau);
-    }
-
-    // Find first minimum below threshold
-    const threshold = 0.1;
-    let tau = 2;
-
-    while (tau < MAX_SAMPLES - 1 && cmndf[tau] >= threshold) {
-        tau++;
-    }
-
-    while (tau < MAX_SAMPLES - 1 && cmndf[tau + 1] < cmndf[tau]) {
-        tau++;
-    }
-
-    if (tau >= MAX_SAMPLES - 1 || cmndf[tau] >= threshold) {
-        return -1;
-    }
-
-    // Parabolic interpolation
-    const s0 = cmndf[tau - 1];
-    const s1 = cmndf[tau];
-    const s2 = cmndf[tau + 1];
-    const adjustment = (s2 - s0) / (2 * (2 * s1 - s2 - s0));
-
-    if (Math.abs(adjustment) < 1) {
-        tau = tau + adjustment;
-    }
-
-    return sampleRate / tau;
-}
-
-// Median filter smoothing
-function getSmoothedPitch(newPitch) {
-    pitchDetection.recentPitches.push(newPitch);
-    if (pitchDetection.recentPitches.length > PITCH_CONFIG.smoothingWindow) {
-        pitchDetection.recentPitches.shift();
-    }
-
-    if (pitchDetection.recentPitches.length < 3) {
-        return newPitch;
-    }
-
-    const sorted = [...pitchDetection.recentPitches].sort((a, b) => a - b);
-    const mid = Math.floor(sorted.length / 2);
-    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-}
+// Set up audio warmup on first user interaction
+setupAudioWarmupListeners();
 
 // Draw visualization
 function drawVisualization() {
@@ -543,7 +359,10 @@ noteSelect.addEventListener('change', updateCurrentNote);
 octaveSelect.addEventListener('change', updateCurrentNote);
 
 playNoteBtn.addEventListener('click', () => {
-    playTone(currentNote.frequency);
+    playNoteBtn.disabled = true;
+    playTone(currentNote.frequency, 1.5, {
+        onComplete: () => { playNoteBtn.disabled = false; }
+    });
 });
 
 startBtn.addEventListener('click', () => {
@@ -1333,9 +1152,11 @@ function previewSequence() {
                 playNext();
             }, durationMs);
         } else {
-            playTone(note.frequency, durationSec, () => {
-                index++;
-                playNext();
+            playTone(note.frequency, durationSec, {
+                onComplete: () => {
+                    index++;
+                    playNext();
+                }
             });
         }
     }
@@ -1389,61 +1210,6 @@ async function startSequence() {
         console.error('Microphone error:', err);
         sequenceStatus.textContent = 'Error: Could not access microphone.';
     }
-}
-
-// Pre-created click sound buffer (created on first use)
-let clickBuffer = null;
-
-// Create or get the click sound buffer
-function getClickBuffer(ctx) {
-    if (clickBuffer && clickBuffer.sampleRate === ctx.sampleRate) {
-        return clickBuffer;
-    }
-
-    // Create a short noise burst for a woodblock-like sound
-    const bufferSize = Math.floor(ctx.sampleRate * 0.02); // 20ms of noise
-    clickBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-    const data = clickBuffer.getChannelData(0);
-
-    // Generate noise
-    for (let i = 0; i < bufferSize; i++) {
-        data[i] = Math.random() * 2 - 1;
-    }
-
-    return clickBuffer;
-}
-
-// Create a single buffer containing 3 countdown clicks with silence between
-function createCountdownBuffer(ctx, beatIntervalSec, leadInSec = 0) {
-    const sampleRate = ctx.sampleRate;
-    const clickDuration = 0.02; // 20ms per click
-    const clickSamples = Math.floor(sampleRate * clickDuration);
-    const leadInSamples = Math.floor(sampleRate * leadInSec);
-
-    // Total buffer length: lead-in + 3 beats (last click at beat 2, ends at ~beat 2 + click duration)
-    const totalDuration = leadInSec + (2 * beatIntervalSec) + clickDuration;
-    const totalSamples = Math.floor(sampleRate * totalDuration);
-
-    const buffer = ctx.createBuffer(1, totalSamples, sampleRate);
-    const data = buffer.getChannelData(0);
-
-    // Fill with silence first
-    data.fill(0);
-
-    // Add 3 clicks at the appropriate positions (after lead-in)
-    for (let beat = 0; beat < 3; beat++) {
-        const startSample = leadInSamples + Math.floor(beat * beatIntervalSec * sampleRate);
-
-        // Generate noise for this click with decay envelope
-        for (let i = 0; i < clickSamples && (startSample + i) < totalSamples; i++) {
-            const noise = Math.random() * 2 - 1;
-            // Apply decay envelope (starts at 0.6, decays to near 0)
-            const envelope = 0.6 * Math.exp(-i / (sampleRate * 0.005)); // 5ms decay
-            data[startSample + i] = noise * envelope;
-        }
-    }
-
-    return buffer;
 }
 
 // Trigger a visual pulse on the Go/Stop button

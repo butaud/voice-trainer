@@ -21,3 +21,9 @@ export {
     drawGrandStaffLedgerLines,
     drawMiniLedgerLines
 } from './notes.js';
+
+// Mini staff rendering
+export {
+    getNoteDisplayName,
+    drawMiniStaff
+} from './miniStaff.js';

@@ -110,3 +110,15 @@ export const sequences = {
         notes: []
     }
 };
+
+// ============================================================================
+// Note Selector State
+// ============================================================================
+export const noteSelectorState = {
+    isOpen: false,
+    mode: 'free', // 'free' or 'song'
+    hoveredNote: null,
+    selectedNote: null, // {note, octave} - pending selection before OK
+    accidental: 'natural', // 'flat', 'natural', or 'sharp'
+    notePositions: [] // Array of {note, octave, x, y, width, height} for hit detection
+};

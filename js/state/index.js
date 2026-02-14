@@ -12,5 +12,6 @@ export {
     sequenceState,
     previewScrollState,
     userScrollState,
-    sequences
+    sequences,
+    noteSelectorState
 } from './store.js';

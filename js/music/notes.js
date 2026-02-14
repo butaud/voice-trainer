@@ -114,3 +114,106 @@ export function getYForStaffPosition(staffPos, clef, staffTop, lineSpacing) {
 
     return bottomLineY - ((staffPos - refPosition) * lineSpacing / 2);
 }
+
+// ============================================================================
+// Accidental Utilities
+// ============================================================================
+
+/**
+ * Get the base note name without any accidentals
+ * @param {string} note - Note name (e.g., 'C#', 'Db', 'C')
+ * @returns {string} Base note name (e.g., 'C', 'D', 'C')
+ */
+export function getBaseNote(note) {
+    return note.replace('#', '').replace('b', '');
+}
+
+/**
+ * Get the accidental type from a note string
+ * @param {string} note - Note name
+ * @returns {string} 'sharp', 'flat', or 'natural'
+ */
+export function getAccidentalFromNote(note) {
+    if (note.includes('#')) return 'sharp';
+    if (note.includes('b')) return 'flat';
+    return 'natural';
+}
+
+/**
+ * Apply an accidental to a base note
+ * @param {string} baseNote - Base note name (e.g., 'C')
+ * @param {string} accidental - 'sharp', 'flat', or 'natural'
+ * @returns {string} Note with accidental (e.g., 'C#', 'Cb', 'C')
+ */
+export function applyAccidental(baseNote, accidental) {
+    if (accidental === 'sharp') return baseNote + '#';
+    if (accidental === 'flat') return baseNote + 'b';
+    return baseNote;
+}
+
+/**
+ * Convert flat notes to their enharmonic sharp equivalents
+ * Useful for dropdown compatibility where only sharps are used
+ * @param {string} note - Note name (e.g., 'Db')
+ * @param {number} octave - Octave number
+ * @returns {{note: string, octave: number}} Enharmonic equivalent
+ */
+export function flatToSharpEquivalent(note, octave) {
+    if (!note.includes('b')) return { note, octave };
+
+    const baseNote = note.replace('b', '');
+    const flatToSharp = {
+        'D': { note: 'C#', octaveAdjust: 0 },
+        'E': { note: 'D#', octaveAdjust: 0 },
+        'G': { note: 'F#', octaveAdjust: 0 },
+        'A': { note: 'G#', octaveAdjust: 0 },
+        'B': { note: 'A#', octaveAdjust: 0 },
+        'C': { note: 'B', octaveAdjust: -1 },  // Cb -> B of lower octave
+        'F': { note: 'E', octaveAdjust: 0 }    // Fb -> E (rare but handle it)
+    };
+
+    const equiv = flatToSharp[baseNote];
+    if (equiv) {
+        return { note: equiv.note, octave: octave + equiv.octaveAdjust };
+    }
+    return { note, octave };
+}
+
+// ============================================================================
+// Note Range Utilities
+// ============================================================================
+
+/** Natural note names in order */
+export const NATURAL_NOTES = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
+
+/**
+ * Get all natural notes in the selectable range (E2 to G5)
+ * @returns {Array<{note: string, octave: number}>} Array of note objects
+ */
+export function getNoteRange() {
+    const notes = [];
+    for (let octave = 2; octave <= 5; octave++) {
+        for (const note of NATURAL_NOTES) {
+            // Skip notes before E2
+            if (octave === 2 && NATURAL_NOTES.indexOf(note) < NATURAL_NOTES.indexOf('E')) continue;
+            // Skip notes after G5
+            if (octave === 5 && NATURAL_NOTES.indexOf(note) > NATURAL_NOTES.indexOf('G')) continue;
+            notes.push({ note, octave });
+        }
+    }
+    return notes;
+}
+
+/**
+ * Check if a note/octave is within the valid selectable range (E2 to G5)
+ * @param {string} note - Note name
+ * @param {number} octave - Octave number
+ * @returns {boolean} True if in range
+ */
+export function isNoteInRange(note, octave) {
+    const baseNote = getBaseNote(note);
+    const staffPos = getStaffPosition(baseNote, octave);
+    const minPos = getStaffPosition('E', 2);
+    const maxPos = getStaffPosition('G', 5);
+    return staffPos >= minPos && staffPos <= maxPos;
+}

@@ -5,6 +5,7 @@ import {
     NOTE_NAMES,
     NOTE_TYPES,
     DIATONIC_POSITION,
+    NATURAL_NOTES,
     getFrequency,
     getNoteFromFrequency,
     getCentsDifference,
@@ -12,7 +13,16 @@ import {
     semitoneToNote,
     getStaffPosition,
     getBestClef,
-    getYForStaffPosition
+    getYForStaffPosition,
+    getBaseNote,
+    getAccidentalFromNote,
+    applyAccidental,
+    flatToSharpEquivalent,
+    getNoteRange,
+    isNoteInRange,
+    calculateNoteScore,
+    calculateGrade,
+    frequencyToStaffY
 } from './js/music/index.js';
 
 import {
@@ -788,28 +798,6 @@ function getPlaybackProgress(elapsedTime, scrollParams) {
 
 // =============================================================================
 
-// Convert frequency to Y position on staff
-function frequencyToStaffY(frequency, clef, staffTop, lineSpacing) {
-    // Convert frequency to note name and octave
-    const midiNote = 12 * Math.log2(frequency / 440) + 69;
-    const noteIndex = Math.round(midiNote) % 12;
-    const octave = Math.floor(Math.round(midiNote) / 12) - 1;
-    const noteName = noteNames[noteIndex];
-
-    // Get staff position and Y coordinate
-    const staffPos = getStaffPosition(noteName, octave);
-
-    // For smooth visualization, interpolate based on actual frequency deviation
-    const exactMidi = 12 * Math.log2(frequency / 440) + 69;
-    const deviation = exactMidi - Math.round(midiNote); // -0.5 to +0.5
-
-    const baseY = getYForStaffPosition(staffPos, clef, staffTop, lineSpacing);
-    // Each semitone is roughly half a staff position, adjust Y accordingly
-    const yAdjustment = -deviation * (lineSpacing / 2);
-
-    return baseY + yAdjustment;
-}
-
 // Main function to draw sheet music
 function drawSheetMusic(activeIndex = -1, completedUpTo = -1, noteScores = null, playbackTime = -1, showFinalTrace = false, noteOffsetX = 0, previewScrollOffset = 0) {
     const canvas = sheetMusicCanvas;
@@ -1534,36 +1522,6 @@ function finalizeCurrentNote() {
     });
 }
 
-// Calculate score for a single note
-function calculateNoteScore(pitchSamples, timeOnPitch, totalTime) {
-    if (pitchSamples.length === 0) {
-        return 0;
-    }
-
-    // Accuracy score (60 points max) - based on average cents deviation (very lenient)
-    const avgCents = pitchSamples.reduce((a, b) => a + Math.abs(b), 0) / pitchSamples.length;
-    let accuracyScore;
-    if (avgCents <= 25) {
-        accuracyScore = 60;
-    } else if (avgCents <= 50) {
-        accuracyScore = 55;
-    } else if (avgCents <= 75) {
-        accuracyScore = 50;
-    } else if (avgCents <= 100) {
-        accuracyScore = 40;
-    } else if (avgCents <= 150) {
-        accuracyScore = 30;
-    } else {
-        accuracyScore = Math.max(10, 25 - (avgCents - 150) / 20);
-    }
-
-    // Time on pitch score (40 points max) - count within ±50 cents as "on pitch"
-    const timeRatio = timeOnPitch / totalTime;
-    const timeScore = timeRatio * 40;
-
-    return Math.round(accuracyScore + timeScore);
-}
-
 // Finish sequence and show results
 function finishSequence() {
     stopSequence();
@@ -1993,25 +1951,6 @@ const freeOctaveDown = document.getElementById('free-octave-down');
 const freeOctaveUp = document.getElementById('free-octave-up');
 const songOctaveDown = document.getElementById('song-octave-down');
 const songOctaveUp = document.getElementById('song-octave-up');
-
-// Natural notes only (no sharps/flats)
-const naturalNotes = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
-
-// Generate note range from E2 to G5 (natural notes only)
-function getNoteRange() {
-    const notes = [];
-    // E2 to G5: natural notes only
-    for (let octave = 2; octave <= 5; octave++) {
-        for (const note of naturalNotes) {
-            // Skip notes before E2
-            if (octave === 2 && naturalNotes.indexOf(note) < naturalNotes.indexOf('E')) continue;
-            // Skip notes after G5
-            if (octave === 5 && naturalNotes.indexOf(note) > naturalNotes.indexOf('G')) continue;
-            notes.push({ note, octave });
-        }
-    }
-    return notes;
-}
 
 // Draw a mini-staff for results breakdown with context notes (prev/next shown faded)
 function drawBreakdownMiniStaff(canvas, sequence, noteIndex, noteScore) {
@@ -2466,48 +2405,6 @@ function getNoteAtPosition(x, y) {
     return null;
 }
 
-// Get the base note from a note that may have accidentals
-function getBaseNote(note) {
-    return note.replace('#', '').replace('b', '');
-}
-
-// Get the accidental from a note string
-function getAccidentalFromNote(note) {
-    if (note.includes('#')) return 'sharp';
-    if (note.includes('b')) return 'flat';
-    return 'natural';
-}
-
-// Apply accidental to a base note
-function applyAccidental(baseNote, accidental) {
-    if (accidental === 'sharp') return baseNote + '#';
-    if (accidental === 'flat') return baseNote + 'b';
-    return baseNote;
-}
-
-// Convert flat notes to their enharmonic sharp equivalents for dropdown compatibility
-// Returns { note, octave } with adjusted octave if needed (e.g., Cb -> B of lower octave)
-function flatToSharpEquivalent(note, octave) {
-    if (!note.includes('b')) return { note, octave };
-
-    const baseNote = note.replace('b', '');
-    const flatToSharp = {
-        'D': { note: 'C#', octaveAdjust: 0 },
-        'E': { note: 'D#', octaveAdjust: 0 },
-        'G': { note: 'F#', octaveAdjust: 0 },
-        'A': { note: 'G#', octaveAdjust: 0 },
-        'B': { note: 'A#', octaveAdjust: 0 },
-        'C': { note: 'B', octaveAdjust: -1 },  // Cb -> B of lower octave
-        'F': { note: 'E', octaveAdjust: 0 }    // Fb -> E (rare but handle it)
-    };
-
-    const equiv = flatToSharp[baseNote];
-    if (equiv) {
-        return { note: equiv.note, octave: octave + equiv.octaveAdjust };
-    }
-    return { note, octave };
-}
-
 // Update the accidental toggle UI
 function updateAccidentalToggle(accidental) {
     accidentalBtns.forEach(btn => {
@@ -2730,15 +2627,6 @@ function updateSongPracticeMiniStaff() {
     const songOctave = parseInt(startOctaveSelect.value);
     drawMiniStaff(songPracticeMiniCtx, songPracticeMiniCanvas, songNote, songOctave);
     updateOctaveButtonStates();
-}
-
-// Check if a note/octave is within the valid range (E2 to G5)
-function isNoteInRange(note, octave) {
-    const baseNote = getBaseNote(note);
-    const staffPos = getStaffPosition(baseNote, octave);
-    const minPos = getStaffPosition('E', 2); // E2
-    const maxPos = getStaffPosition('G', 5); // G5
-    return staffPos >= minPos && staffPos <= maxPos;
 }
 
 // Update octave button disabled states

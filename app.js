@@ -1,331 +1,55 @@
-// Audio context and nodes
-let audioContext = null;
-let analyser = null;
-let micStream = null;
+// ============================================================================
+// Module Imports
+// ============================================================================
+import {
+    NOTE_NAMES,
+    NOTE_TYPES,
+    DIATONIC_POSITION,
+    getFrequency,
+    getNoteFromFrequency,
+    getCentsDifference,
+    noteToSemitone,
+    semitoneToNote,
+    getStaffPosition,
+    getBestClef,
+    getYForStaffPosition
+} from './js/music/index.js';
 
-// State
-let isRunning = false;
-let animationId = null;
+import {
+    getMusicXMLParts,
+    parseMusicXMLPart
+} from './js/music/musicxml.js';
 
-// Note frequencies
-const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+import {
+    BUILTIN_SEQUENCE_TEMPO,
+    audioState,
+    appState,
+    currentNote,
+    pitchDetection,
+    PITCH_CONFIG,
+    sequenceState,
+    previewScrollState,
+    userScrollState,
+    sequences
+} from './js/state/index.js';
 
-// Note types: whole, half, quarter, eighth, sixteenth (and dotted variants)
-const NOTE_TYPES = {
-    WHOLE: 'whole',
-    HALF: 'half',
-    QUARTER: 'quarter',
-    EIGHTH: 'eighth',
-    SIXTEENTH: 'sixteenth'
-};
+import {
+    TREBLE_CLEF_PATH,
+    BASS_CLEF_PATH,
+    drawTrebleClef,
+    drawBassClef,
+    drawTrebleClefMini,
+    drawBassClefMini,
+    drawNote,
+    drawRest,
+    drawLedgerLines,
+    drawSelectableNote,
+    drawGrandStaffLedgerLines,
+    drawMiniLedgerLines
+} from './js/rendering/index.js';
 
-// Predefined sequences (durations in ms at 90 BPM reference tempo)
-// Quarter note = 667ms, Eighth note = 333ms at 90 BPM
-const sequences = {
-    'simple-scale': {
-        name: 'Simple Scale (C-E)',
-        notes: [
-            { note: 'C', octave: 3, duration: 667, noteType: NOTE_TYPES.QUARTER },
-            { note: 'D', octave: 3, duration: 667, noteType: NOTE_TYPES.QUARTER },
-            { note: 'E', octave: 3, duration: 667, noteType: NOTE_TYPES.QUARTER }
-        ]
-    },
-    'octave-jump': {
-        name: 'Octave Jump',
-        notes: [
-            { note: 'C', octave: 3, duration: 667, noteType: NOTE_TYPES.QUARTER },
-            { note: 'C', octave: 4, duration: 667, noteType: NOTE_TYPES.QUARTER },
-            { note: 'C', octave: 3, duration: 667, noteType: NOTE_TYPES.QUARTER }
-        ]
-    },
-    'major-arpeggio': {
-        name: 'Major Arpeggio',
-        notes: [
-            { note: 'C', octave: 3, duration: 667, noteType: NOTE_TYPES.QUARTER },
-            { note: 'E', octave: 3, duration: 667, noteType: NOTE_TYPES.QUARTER },
-            { note: 'G', octave: 3, duration: 667, noteType: NOTE_TYPES.QUARTER },
-            { note: 'C', octave: 4, duration: 667, noteType: NOTE_TYPES.QUARTER }
-        ]
-    },
-    'full-scale': {
-        name: 'Full Scale Up',
-        notes: [
-            { note: 'C', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'D', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'E', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'F', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'G', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'A', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'B', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'C', octave: 4, duration: 333, noteType: NOTE_TYPES.EIGHTH }
-        ]
-    },
-    'full-scale-up-down': {
-        name: 'Full Scale Up & Down',
-        notes: [
-            { note: 'C', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'D', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'E', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'F', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'G', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'A', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'B', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'C', octave: 4, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'B', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'A', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'G', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'F', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'E', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'D', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'C', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH }
-        ]
-    },
-    'double-scale': {
-        name: 'Double Scale (Up & Down x2)',
-        notes: [
-            { note: 'C', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'D', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'E', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'F', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'G', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'A', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'B', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'C', octave: 4, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'B', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'A', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'G', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'F', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'E', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'D', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'C', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'D', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'E', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'F', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'G', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'A', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'B', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'C', octave: 4, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'B', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'A', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'G', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'F', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'E', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'D', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH },
-            { note: 'C', octave: 3, duration: 333, noteType: NOTE_TYPES.EIGHTH }
-        ]
-    },
-    'custom': {
-        name: 'Custom',
-        notes: []
-    }
-};
-
-// MusicXML Parser - Get list of parts from a MusicXML document
-function getMusicXMLParts(xmlString) {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(xmlString, 'text/xml');
-
-    // Check for parsing errors
-    const parseError = doc.querySelector('parsererror');
-    if (parseError) {
-        throw new Error('Invalid MusicXML file');
-    }
-
-    // Get part list with names
-    const parts = [];
-    const partListEl = doc.querySelector('part-list');
-    if (partListEl) {
-        const scoreParts = partListEl.querySelectorAll('score-part');
-        scoreParts.forEach(sp => {
-            const id = sp.getAttribute('id');
-            const nameEl = sp.querySelector('part-name');
-            const name = nameEl ? nameEl.textContent.trim() : id;
-            parts.push({ id, name });
-        });
-    }
-
-    // Fallback: get parts directly if no part-list
-    if (parts.length === 0) {
-        const partEls = doc.querySelectorAll('part');
-        partEls.forEach((p, i) => {
-            const id = p.getAttribute('id') || `part-${i + 1}`;
-            parts.push({ id, name: `Part ${i + 1}` });
-        });
-    }
-
-    if (parts.length === 0) {
-        throw new Error('No parts found in MusicXML');
-    }
-
-    return { doc, parts };
-}
-
-// MusicXML Parser - Parse notes from a specific part
-function parseMusicXMLPart(doc, partId) {
-    // Get the specified part
-    const part = doc.querySelector(`part[id="${partId}"]`);
-    if (!part) {
-        throw new Error(`Part "${partId}" not found`);
-    }
-
-    // Get tempo (default to 120 BPM if not specified)
-    // Check multiple locations where tempo can be specified in MusicXML
-    let tempo = 120;
-    const soundEl = doc.querySelector('sound[tempo]');
-    if (soundEl) {
-        tempo = parseFloat(soundEl.getAttribute('tempo'));
-    } else {
-        // Also check for metronome marking (common in exported MusicXML)
-        const perMinuteEl = doc.querySelector('metronome per-minute');
-        if (perMinuteEl) {
-            tempo = parseFloat(perMinuteEl.textContent);
-        }
-    }
-
-    // Get divisions (how many divisions per quarter note)
-    const divisionsEl = doc.querySelector('divisions');
-    const divisions = divisionsEl ? parseInt(divisionsEl.textContent) : 1;
-
-    // Get time signature (default to 4/4)
-    let timeBeats = 4;
-    let timeBeatType = 4;
-    const timeEl = doc.querySelector('time');
-    if (timeEl) {
-        const beatsEl = timeEl.querySelector('beats');
-        const beatTypeEl = timeEl.querySelector('beat-type');
-        if (beatsEl) timeBeats = parseInt(beatsEl.textContent);
-        if (beatTypeEl) timeBeatType = parseInt(beatTypeEl.textContent);
-    }
-
-    // Calculate ms per division
-    const msPerBeat = 60000 / tempo; // ms per quarter note
-    const msPerDivision = msPerBeat / divisions;
-
-    const notes = [];
-
-    // Process all measures
-    const measures = part.querySelectorAll('measure');
-    measures.forEach(measure => {
-        const noteEls = measure.querySelectorAll('note');
-        noteEls.forEach(noteEl => {
-            // Skip chord notes (only take the first note of a chord)
-            if (noteEl.querySelector('chord')) return;
-
-            // Check if this is a rest
-            const isRest = noteEl.querySelector('rest') !== null;
-
-            // Get duration
-            const durationEl = noteEl.querySelector('duration');
-            const duration = durationEl ? parseInt(durationEl.textContent) : divisions;
-            const durationMs = duration * msPerDivision;
-
-            // Get note type
-            const typeEl = noteEl.querySelector('type');
-            const typeText = typeEl?.textContent || 'quarter';
-
-            // Check for dotted
-            const dotted = noteEl.querySelector('dot') !== null;
-
-            // Map MusicXML type to our note types
-            let noteType;
-            switch (typeText) {
-                case 'whole': noteType = NOTE_TYPES.WHOLE; break;
-                case 'half': noteType = NOTE_TYPES.HALF; break;
-                case 'quarter': noteType = NOTE_TYPES.QUARTER; break;
-                case 'eighth': noteType = NOTE_TYPES.EIGHTH; break;
-                case '16th': noteType = NOTE_TYPES.SIXTEENTH; break;
-                case '32nd': noteType = NOTE_TYPES.SIXTEENTH; break; // Treat 32nd as 16th
-                default: noteType = NOTE_TYPES.QUARTER;
-            }
-
-            if (isRest) {
-                // Add rest with no pitch info
-                notes.push({
-                    isRest: true,
-                    duration: durationMs,
-                    noteType: noteType,
-                    dotted: dotted
-                });
-            } else {
-                // Get pitch
-                const pitchEl = noteEl.querySelector('pitch');
-                if (!pitchEl) return;
-
-                const step = pitchEl.querySelector('step')?.textContent || 'C';
-                const octave = parseInt(pitchEl.querySelector('octave')?.textContent || '4');
-                const alter = parseInt(pitchEl.querySelector('alter')?.textContent || '0');
-
-                // Convert alter to sharp/flat
-                let noteName = step;
-                if (alter === 1) noteName += '#';
-                else if (alter === -1) {
-                    // Convert flat to equivalent sharp
-                    const flatToSharp = { 'D': 'C#', 'E': 'D#', 'G': 'F#', 'A': 'G#', 'B': 'A#' };
-                    if (flatToSharp[step]) {
-                        noteName = flatToSharp[step];
-                    }
-                }
-
-                notes.push({
-                    note: noteName,
-                    octave: octave,
-                    duration: durationMs,
-                    noteType: noteType,
-                    dotted: dotted,
-                    isRest: false
-                });
-            }
-        });
-    });
-
-    if (notes.length === 0) {
-        throw new Error('No notes found in selected part');
-    }
-
-    return {
-        notes: notes,
-        timeSignature: { beats: timeBeats, beatType: timeBeatType },
-        tempo: tempo  // The BPM at which durations were calculated
-    };
-}
-
-// Sequence state
-const sequenceState = {
-    isSequenceMode: true,
-    isPlaying: false,
-    isPreviewing: false,
-    previewIndex: -1,
-    isCountingDown: false,
-    countdownStartTime: 0,
-    countdownBeatInterval: 1000,
-    countdownLastBeat: -1,
-    currentSequence: [],
-    currentNoteIndex: 0,
-    noteScores: [],
-    pitchSamplesForNote: [],
-    pitchHistory: [],          // Timeline history for visualization
-    timeOnPitch: 0,
-    // For integrated sheet music visualization
-    sequenceStartTime: 0,      // When the sequence started (after countdown)
-    globalPitchTrace: [],      // Array of {time, frequency, noteIndex} for entire sequence
-    // Time signature for beat calculation (from MusicXML or default 4/4)
-    timeSignature: { beats: 4, beatType: 4 },
-    // Source tempo - the BPM at which durations were calculated (90 for built-in, from file for MusicXML)
-    sourceTempo: 90,
-    // Whether to show the final pitch trace (persists after song ends until next action)
-    showFinalTrace: false
-};
-
-// Preview scroll animation state - uses shared scroll utilities
-const previewScrollState = {
-    animationId: null,
-    scrollParams: null,      // From calculateScrollParameters()
-    startTime: 0,            // When preview started (performance.now())
-    // Timing is synced to audio callbacks, so we track per-note timing
-    currentNoteIndex: 0,
-    noteStartTime: 0,
-    noteDuration: 0
-};
+// Legacy alias for backward compatibility within this file
+const noteNames = NOTE_NAMES;
 
 function updatePreviewScroll() {
     if (!sequenceState.isPreviewing || !previewScrollState.scrollParams) {
@@ -395,18 +119,6 @@ function stopPreviewScrollAnimation() {
     previewScrollState.scrollParams = null;
 }
 
-function getFrequency(note, octave) {
-    const noteIndex = noteNames.indexOf(note);
-    const midiNote = (octave + 1) * 12 + noteIndex;
-    return 440 * Math.pow(2, (midiNote - 69) / 12);
-}
-
-// Current target note
-const currentNote = {
-    name: 'A4',
-    frequency: 440
-};
-
 // DOM elements
 const playNoteBtn = document.getElementById('play-note');
 const startBtn = document.getElementById('start-btn');
@@ -422,29 +134,17 @@ const noteNameEl = document.getElementById('note-name');
 const noteFreqEl = document.getElementById('note-freq');
 const targetNoteLabelEl = document.getElementById('target-note-label');
 
-// Sliding window for pitch history (time-based)
-const windowDuration = 3; // seconds
-const samplesPerSecond = 30;
-const maxSamples = windowDuration * samplesPerSecond;
-const pitchHistory = [];
-
-// Smoothing for pitch detection
-const recentPitches = [];
-const smoothingWindow = 5;
-
 // Initialize audio context
-let audioWarmedUp = false;
-
 function getAudioContext() {
-    if (!audioContext) {
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    if (!audioState.context) {
+        audioState.context = new (window.AudioContext || window.webkitAudioContext)();
     }
-    return audioContext;
+    return audioState.context;
 }
 
 // Warm up audio context to avoid first-play lag - must be called from user gesture
 function warmUpAudio() {
-    if (audioWarmedUp) return Promise.resolve();
+    if (audioState.warmedUp) return Promise.resolve();
 
     const ctx = getAudioContext();
 
@@ -480,7 +180,7 @@ function warmUpAudio() {
         noise.start(ctx.currentTime);
         noise.stop(ctx.currentTime + 0.01);
 
-        audioWarmedUp = true;
+        audioState.warmedUp = true;
     });
 }
 
@@ -494,9 +194,6 @@ function onFirstInteraction() {
 document.addEventListener('click', onFirstInteraction);
 document.addEventListener('touchstart', onFirstInteraction);
 document.addEventListener('keydown', onFirstInteraction);
-
-// Current preview audio state (for stopping)
-let currentPreviewAudio = null;
 
 // Play reference tone - returns a stop function
 function playTone(frequency, duration = 1.5, callback = null) {
@@ -530,7 +227,7 @@ function playTone(frequency, duration = 1.5, callback = null) {
         if (callback) {
             timeoutId = setTimeout(callback, duration * 1000);
             // Store reference for stopping preview
-            currentPreviewAudio = {
+            audioState.currentPreviewAudio = {
                 oscillator,
                 gainNode,
                 timeoutId,
@@ -621,32 +318,18 @@ function detectPitch(buffer, sampleRate) {
 
 // Median filter smoothing
 function getSmoothedPitch(newPitch) {
-    recentPitches.push(newPitch);
-    if (recentPitches.length > smoothingWindow) {
-        recentPitches.shift();
+    pitchDetection.recentPitches.push(newPitch);
+    if (pitchDetection.recentPitches.length > PITCH_CONFIG.smoothingWindow) {
+        pitchDetection.recentPitches.shift();
     }
 
-    if (recentPitches.length < 3) {
+    if (pitchDetection.recentPitches.length < 3) {
         return newPitch;
     }
 
-    const sorted = [...recentPitches].sort((a, b) => a - b);
+    const sorted = [...pitchDetection.recentPitches].sort((a, b) => a - b);
     const mid = Math.floor(sorted.length / 2);
     return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-}
-
-// Convert frequency to cents difference
-function getCentsDifference(detected, target) {
-    return 1200 * Math.log2(detected / target);
-}
-
-// Get note name from frequency
-function getNoteFromFrequency(frequency) {
-    const noteNum = 12 * (Math.log2(frequency / 440)) + 69;
-    const note = Math.round(noteNum);
-    const noteName = noteNames[note % 12];
-    const octave = Math.floor(note / 12) - 1;
-    return `${noteName}${octave}`;
 }
 
 // Draw visualization
@@ -695,14 +378,14 @@ function drawVisualization() {
 
     let lastValidPoint = null;
 
-    for (let i = 0; i < pitchHistory.length; i++) {
-        const cents = pitchHistory[i];
+    for (let i = 0; i < pitchDetection.history.length; i++) {
+        const cents = pitchDetection.history[i];
         if (cents === null) {
             lastValidPoint = null;
             continue;
         }
 
-        const x = (i / maxSamples) * drawWidth;
+        const x = (i / PITCH_CONFIG.maxSamples) * drawWidth;
         const clampedCents = Math.max(-100, Math.min(100, cents));
         const y = centerY - (clampedCents / 100) * (height / 2 - 10);
 
@@ -725,7 +408,7 @@ function drawVisualization() {
     }
 
     // Current position indicator
-    if (lastValidPoint && isRunning) {
+    if (lastValidPoint && appState.isRunning) {
         canvasCtx.beginPath();
         canvasCtx.arc(lastValidPoint.x, lastValidPoint.y, 8, 0, Math.PI * 2);
 
@@ -744,20 +427,17 @@ function drawVisualization() {
 }
 
 // Main analysis loop
-let lastSampleTime = 0;
-const sampleInterval = 1000 / samplesPerSecond;
-
 function analyze(timestamp) {
-    if (!isRunning) return;
+    if (!appState.isRunning) return;
 
     // Sample at fixed rate
-    if (timestamp - lastSampleTime >= sampleInterval) {
-        lastSampleTime = timestamp;
+    if (timestamp - pitchDetection.lastSampleTime >= PITCH_CONFIG.sampleInterval) {
+        pitchDetection.lastSampleTime = timestamp;
 
-        const buffer = new Float32Array(analyser.fftSize);
-        analyser.getFloatTimeDomainData(buffer);
+        const buffer = new Float32Array(audioState.analyser.fftSize);
+        audioState.analyser.getFloatTimeDomainData(buffer);
 
-        const rawPitch = detectPitch(buffer, audioContext.sampleRate);
+        const rawPitch = detectPitch(buffer, audioState.context.sampleRate);
 
         if (rawPitch !== -1 && rawPitch > 80 && rawPitch < 1000) {
             const pitch = getSmoothedPitch(rawPitch);
@@ -776,19 +456,19 @@ function analyze(timestamp) {
                 centsOffEl.className = Math.abs(centsRounded) <= 10 ? 'on-pitch' : 'flat';
             }
 
-            pitchHistory.push(cents);
+            pitchDetection.history.push(cents);
         } else {
-            pitchHistory.push(null);
+            pitchDetection.history.push(null);
         }
 
         // Keep sliding window
-        while (pitchHistory.length > maxSamples) {
-            pitchHistory.shift();
+        while (pitchDetection.history.length > PITCH_CONFIG.maxSamples) {
+            pitchDetection.history.shift();
         }
     }
 
     drawVisualization();
-    animationId = requestAnimationFrame(analyze);
+    appState.animationId = requestAnimationFrame(analyze);
 }
 
 // Start live analysis
@@ -798,23 +478,23 @@ async function start() {
         await warmUpAudio();
         const ctx = getAudioContext();
 
-        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const source = ctx.createMediaStreamSource(micStream);
+        audioState.micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const source = ctx.createMediaStreamSource(audioState.micStream);
 
-        analyser = ctx.createAnalyser();
-        analyser.fftSize = 4096;
-        source.connect(analyser);
+        audioState.analyser = ctx.createAnalyser();
+        audioState.analyser.fftSize = 4096;
+        source.connect(audioState.analyser);
 
-        pitchHistory.length = 0;
-        recentPitches.length = 0;
-        lastSampleTime = 0;
+        pitchDetection.history.length = 0;
+        pitchDetection.recentPitches.length = 0;
+        pitchDetection.lastSampleTime = 0;
 
-        isRunning = true;
+        appState.isRunning = true;
         startBtn.textContent = 'Stop';
         startBtn.classList.add('recording');
         statusEl.textContent = 'Listening...';
 
-        animationId = requestAnimationFrame(analyze);
+        appState.animationId = requestAnimationFrame(analyze);
 
     } catch (err) {
         console.error('Microphone error:', err);
@@ -824,16 +504,16 @@ async function start() {
 
 // Stop live analysis
 function stop() {
-    isRunning = false;
+    appState.isRunning = false;
 
-    if (animationId) {
-        cancelAnimationFrame(animationId);
-        animationId = null;
+    if (appState.animationId) {
+        cancelAnimationFrame(appState.animationId);
+        appState.animationId = null;
     }
 
-    if (micStream) {
-        micStream.getTracks().forEach(track => track.stop());
-        micStream = null;
+    if (audioState.micStream) {
+        audioState.micStream.getTracks().forEach(track => track.stop());
+        audioState.micStream = null;
     }
 
     startBtn.textContent = 'Start';
@@ -864,7 +544,7 @@ playNoteBtn.addEventListener('click', () => {
 });
 
 startBtn.addEventListener('click', () => {
-    if (isRunning) {
+    if (appState.isRunning) {
         stop();
     } else {
         start();
@@ -884,15 +564,6 @@ const startNoteSelect = document.getElementById('start-note-select');
 const startOctaveSelect = document.getElementById('start-octave-select');
 const sheetMusicCanvas = document.getElementById('sheet-music-canvas');
 const sheetMusicCtx = sheetMusicCanvas.getContext('2d');
-
-// User scroll state for manually scrolling long scores when idle
-const userScrollState = {
-    offset: 0,
-    maxOffset: 0,
-    isDragging: false,
-    startX: 0,
-    startOffset: 0
-};
 
 // Sheet music scroll event handlers
 sheetMusicCanvas.addEventListener('mousedown', (e) => {
@@ -1051,23 +722,11 @@ function setMode(mode) {
         modeFreeBtn.classList.remove('active');
         freePracticeSections.forEach(el => el.style.display = 'none');
         sequenceSection.style.display = '';
-        if (isRunning) {
+        if (appState.isRunning) {
             stop();
         }
         loadSequence(sequenceSelect.value);
     }
-}
-
-// Convert note + octave to semitone number (C0 = 0)
-function noteToSemitone(note, octave) {
-    return octave * 12 + noteNames.indexOf(note);
-}
-
-// Convert semitone number back to note + octave
-function semitoneToNote(semitone) {
-    const octave = Math.floor(semitone / 12);
-    const noteIndex = ((semitone % 12) + 12) % 12; // Handle negative values
-    return { note: noteNames[noteIndex], octave };
 }
 
 // Load sequence with transposition based on selected starting note
@@ -1163,370 +822,6 @@ function getAdjustedDuration(baseDuration) {
     }
 
     return baseDuration * (sequenceState.sourceTempo / effectiveTempoBPM);
-}
-
-// Sheet music drawing
-
-// Diatonic note positions (C=0, D=1, E=2, F=3, G=4, A=5, B=6)
-const diatonicPosition = { 'C': 0, 'D': 1, 'E': 2, 'F': 3, 'G': 4, 'A': 5, 'B': 6 };
-
-// Get the diatonic position of a note (for vertical placement on staff)
-function getStaffPosition(note, octave) {
-    // Get base note without sharp
-    const baseNote = note.replace('#', '');
-    // Position relative to C0: octave * 7 + diatonic position
-    return octave * 7 + diatonicPosition[baseNote];
-}
-
-// Determine best clef for a sequence
-function getBestClef(sequence) {
-    // Filter out rests since they don't have pitch information
-    const pitchedNotes = sequence.filter(n => !n.isRest);
-    if (pitchedNotes.length === 0) return 'treble';
-
-    // Calculate average staff position
-    const avgPosition = pitchedNotes.reduce((sum, n) => sum + getStaffPosition(n.note, n.octave), 0) / pitchedNotes.length;
-
-    // Middle C (C4) is at position 28
-    // Use treble if average is >= C4, bass otherwise
-    return avgPosition >= 28 ? 'treble' : 'bass';
-}
-
-// Get Y position on canvas for a staff position
-function getYForStaffPosition(staffPos, clef, staffTop, lineSpacing) {
-    // Reference positions for each clef (the note on the bottom line)
-    // Treble: bottom line is E4 (position 30)
-    // Bass: bottom line is G2 (position 18)
-    const refPosition = clef === 'treble' ? 30 : 18;
-
-    // Each staff position is half a line spacing
-    // Bottom line is at staffTop + 4 * lineSpacing
-    const bottomLineY = staffTop + 4 * lineSpacing;
-    const positionDiff = staffPos - refPosition;
-
-    return bottomLineY - (positionDiff * lineSpacing / 2);
-}
-
-// SVG path for treble clef
-const TREBLE_CLEF_PATH = "m51.688 5.25c-5.427-0.1409-11.774 12.818-11.563 24.375 0.049 3.52 1.16 10.659 2.781 19.625-10.223 10.581-22.094 21.44-22.094 35.688-0.163 13.057 7.817 29.692 26.75 29.532 2.906-0.02 5.521-0.38 7.844-1 1.731 9.49 2.882 16.98 2.875 20.44 0.061 13.64-17.86 14.99-18.719 7.15 3.777-0.13 6.782-3.13 6.782-6.84 0-3.79-3.138-6.88-7.032-6.88-2.141 0-4.049 0.94-5.343 2.41-0.03 0.03-0.065 0.06-0.094 0.09-0.292 0.31-0.538 0.68-0.781 1.1-0.798 1.35-1.316 3.29-1.344 6.06 0 11.42 28.875 18.77 28.875-3.75 0.045-3.03-1.258-10.72-3.156-20.41 20.603-7.45 15.427-38.04-3.531-38.184-1.47 0.015-2.887 0.186-4.25 0.532-1.08-5.197-2.122-10.241-3.032-14.876 7.199-7.071 13.485-16.224 13.344-33.093 0.022-12.114-4.014-21.828-8.312-21.969zm1.281 11.719c2.456-0.237 4.406 2.043 4.406 7.062 0.199 8.62-5.84 16.148-13.031 23.719-0.688-4.147-1.139-7.507-1.188-9.5 0.204-13.466 5.719-20.886 9.813-21.281zm-7.719 44.687c0.877 4.515 1.824 9.272 2.781 14.063-12.548 4.464-18.57 21.954-0.781 29.781-10.843-9.231-5.506-20.158 2.312-22.062 1.966 9.816 3.886 19.502 5.438 27.872-2.107 0.74-4.566 1.17-7.438 1.19-7.181 0-21.531-4.57-21.531-21.875 0-14.494 10.047-20.384 19.219-28.969zm6.094 21.469c0.313-0.019 0.652-0.011 0.968 0 13.063 0 17.99 20.745 4.688 27.375-1.655-8.32-3.662-17.86-5.656-27.375z";
-
-// SVG path for bass clef body (with group translate applied from original)
-const BASS_CLEF_PATH = "m13.976 0.23c-8.785 0.21-15.515 6.36-13.334 15.79 0.002 0.01 0.013 0.02 0.016 0.03 0.256 3.25 2.96 5.81 6.276 5.81 3.485 0 6.309-2.82 6.309-6.3 0-3.08-2.191-5.64-5.098-6.2-1.158-0.41-2.896-1.34-2.82-2.84 0.036-0.74 0.903-2.09 2.294-2.77 1.691-0.79 3.434-1.22 5.194-0.86 2.667 0.49 9.489 5.39 10.019 13.88 0.31 6.44-3.31 15.15-6.849 19.27-5.698 6.51-14.851 10.55-13.955 11.27 0.803 0.72 11.61-4.22 17.237-10.42 6.867-7.44 10.267-13.64 9.937-21.17-0.19-7.54-6.03-15.7-15.226-15.49z";
-
-// Draw a treble clef using SVG path
-function drawTrebleClef(ctx, x, staffTop, lineSpacing) {
-    ctx.save();
-    ctx.fillStyle = '#999';
-
-    // Scale based on line spacing (base scale 0.50 for lineSpacing=10)
-    const scale = (lineSpacing / 10) * 0.50;
-    const offsetX = x - 4 * (lineSpacing / 10);
-    // The G-circle in the SVG needs to align with G line (staffTop + 3*lineSpacing)
-    const offsetY = staffTop - 1.75 * lineSpacing;
-
-    ctx.translate(offsetX, offsetY);
-    ctx.scale(scale, scale);
-
-    const path = new Path2D(TREBLE_CLEF_PATH);
-    ctx.fill(path);
-
-    ctx.restore();
-}
-
-// Draw a bass clef using SVG path
-function drawBassClef(ctx, x, staffTop, lineSpacing) {
-    ctx.save();
-    ctx.fillStyle = '#999';
-
-    // Scale 0.75 for lineSpacing=10, position to align with F line
-    const scale = (lineSpacing / 10) * 0.75;
-    const offsetX = x + 6 * (lineSpacing / 10);
-    const offsetY = staffTop - 0.3 * lineSpacing;
-
-    ctx.translate(offsetX, offsetY);
-    ctx.scale(scale, scale);
-
-    // Draw main body
-    const path = new Path2D(BASS_CLEF_PATH);
-    ctx.fill(path);
-
-    // Draw two dots (positions from original SVG)
-    ctx.beginPath();
-    ctx.arc(36, 9.5, 5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(36, 22.6, 5, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.restore();
-}
-
-// Draw a note with stem (supports different note types)
-function drawNote(ctx, x, y, isSharp, isActive, isCompleted, staffMiddleY, score = null, noteType = NOTE_TYPES.QUARTER, dotted = false, pulseAmount = 0) {
-    ctx.save();
-
-    // Determine colors
-    let noteColor;
-    if (score !== null) {
-        // Color based on performance score
-        if (score >= 70) {
-            noteColor = '#6bcb77'; // Green - good
-        } else if (score >= 40) {
-            noteColor = '#ffd93d'; // Yellow - okay
-        } else {
-            noteColor = '#ff6b6b'; // Red - poor
-        }
-    } else if (isActive) {
-        noteColor = '#4ecdc4'; // Cyan - current
-    } else if (isCompleted) {
-        noteColor = '#6bcb77'; // Green - completed
-    } else {
-        noteColor = '#bbb'; // Gray - upcoming
-    }
-    ctx.fillStyle = noteColor;
-    ctx.strokeStyle = noteColor;
-
-    // Apply pulse effect for active notes (scale and glow)
-    if (pulseAmount > 0) {
-        const scale = 1 + pulseAmount * 0.3; // Scale up to 1.3x at max pulse
-        ctx.translate(x, y);
-        ctx.scale(scale, scale);
-        ctx.translate(-x, -y);
-
-        // Add glow effect
-        ctx.shadowColor = '#4ecdc4';
-        ctx.shadowBlur = 8 + pulseAmount * 12; // 8-20px blur
-    }
-
-    // Note head dimensions
-    const noteWidth = 7;
-    const noteHeight = 5;
-    const stemHeight = 30;
-    const stemWidth = 1.5;
-
-    // Determine if note head should be filled or hollow
-    const isHollow = noteType === NOTE_TYPES.WHOLE || noteType === NOTE_TYPES.HALF;
-    const hasStem = noteType !== NOTE_TYPES.WHOLE;
-    const hasFlag = noteType === NOTE_TYPES.EIGHTH || noteType === NOTE_TYPES.SIXTEENTH;
-    const hasDoubleFlag = noteType === NOTE_TYPES.SIXTEENTH;
-
-    // Stem direction: down if on or above middle line, up if below
-    const stemDown = y <= staffMiddleY;
-
-    // Draw note head
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    if (noteType === NOTE_TYPES.WHOLE) {
-        // Whole note: wider, more horizontal oval
-        ctx.ellipse(x, y, noteWidth + 2, noteHeight, 0, 0, 2 * Math.PI);
-    } else {
-        // Other notes: tilted oval
-        ctx.ellipse(x, y, noteWidth, noteHeight, -0.3, 0, 2 * Math.PI);
-    }
-
-    if (isHollow) {
-        ctx.lineWidth = 2;
-        ctx.stroke();
-    } else {
-        ctx.fill();
-    }
-
-    // Draw stem
-    if (hasStem) {
-        if (stemDown) {
-            // Stem down (on left side of note)
-            ctx.fillRect(x - noteWidth + 1, y, stemWidth, stemHeight);
-
-            // Draw flag(s) for eighth/sixteenth note (stem down)
-            if (hasFlag) {
-                ctx.beginPath();
-                ctx.moveTo(x - noteWidth + 1 + stemWidth, y + stemHeight);
-                ctx.quadraticCurveTo(
-                    x - noteWidth + 15, y + stemHeight - 5,
-                    x - noteWidth + 12, y + stemHeight - 15
-                );
-                ctx.lineWidth = 2;
-                ctx.stroke();
-
-                // Second flag for sixteenth note
-                if (hasDoubleFlag) {
-                    ctx.beginPath();
-                    ctx.moveTo(x - noteWidth + 1 + stemWidth, y + stemHeight - 6);
-                    ctx.quadraticCurveTo(
-                        x - noteWidth + 15, y + stemHeight - 11,
-                        x - noteWidth + 12, y + stemHeight - 21
-                    );
-                    ctx.stroke();
-                }
-            }
-        } else {
-            // Stem up (on right side of note)
-            ctx.fillRect(x + noteWidth - stemWidth - 1, y - stemHeight, stemWidth, stemHeight);
-
-            // Draw flag(s) for eighth/sixteenth note (stem up)
-            if (hasFlag) {
-                ctx.beginPath();
-                ctx.moveTo(x + noteWidth - 1, y - stemHeight);
-                ctx.quadraticCurveTo(
-                    x + noteWidth + 10, y - stemHeight + 5,
-                    x + noteWidth + 8, y - stemHeight + 15
-                );
-                ctx.lineWidth = 2;
-                ctx.stroke();
-
-                // Second flag for sixteenth note
-                if (hasDoubleFlag) {
-                    ctx.beginPath();
-                    ctx.moveTo(x + noteWidth - 1, y - stemHeight + 6);
-                    ctx.quadraticCurveTo(
-                        x + noteWidth + 10, y - stemHeight + 11,
-                        x + noteWidth + 8, y - stemHeight + 21
-                    );
-                    ctx.stroke();
-                }
-            }
-        }
-    }
-
-    // Draw dot for dotted notes
-    if (dotted) {
-        ctx.beginPath();
-        ctx.arc(x + noteWidth + 5, y, 2, 0, 2 * Math.PI);
-        ctx.fill();
-    }
-
-    // Draw sharp if needed
-    if (isSharp) {
-        ctx.font = 'bold 14px serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('♯', x - 16, y);
-    }
-
-    ctx.restore();
-}
-
-// Draw a rest symbol
-function drawRest(ctx, x, staffTop, lineSpacing, isActive, isCompleted, noteType = NOTE_TYPES.QUARTER, dotted = false, pulseAmount = 0) {
-    ctx.save();
-
-    // Set color based on state
-    if (isActive) {
-        ctx.fillStyle = '#4ecdc4';
-        ctx.strokeStyle = '#4ecdc4';
-    } else if (isCompleted) {
-        ctx.fillStyle = 'rgba(78, 205, 196, 0.5)';
-        ctx.strokeStyle = 'rgba(78, 205, 196, 0.5)';
-    } else {
-        ctx.fillStyle = '#fff';
-        ctx.strokeStyle = '#fff';
-    }
-
-    // Apply pulse effect for active rests
-    const restCenterY = staffTop + 2 * lineSpacing;
-    if (pulseAmount > 0) {
-        const scale = 1 + pulseAmount * 0.3;
-        ctx.translate(x, restCenterY);
-        ctx.scale(scale, scale);
-        ctx.translate(-x, -restCenterY);
-
-        ctx.shadowColor = '#4ecdc4';
-        ctx.shadowBlur = 8 + pulseAmount * 12;
-    }
-
-    ctx.lineWidth = 2;
-    const staffMiddleY = staffTop + 2 * lineSpacing;
-
-    if (noteType === NOTE_TYPES.WHOLE) {
-        // Whole rest: rectangle hanging below the 4th line (2nd from top)
-        const restY = staffTop + lineSpacing;
-        ctx.fillRect(x - 6, restY, 12, 5);
-    } else if (noteType === NOTE_TYPES.HALF) {
-        // Half rest: rectangle sitting on the middle line
-        const restY = staffMiddleY - 5;
-        ctx.fillRect(x - 6, restY, 12, 5);
-    } else if (noteType === NOTE_TYPES.QUARTER) {
-        // Quarter rest: squiggly shape
-        ctx.beginPath();
-        ctx.moveTo(x + 3, staffTop + lineSpacing * 0.5);
-        ctx.lineTo(x - 3, staffTop + lineSpacing * 1.2);
-        ctx.lineTo(x + 3, staffTop + lineSpacing * 2);
-        ctx.lineTo(x - 2, staffTop + lineSpacing * 2.8);
-        ctx.quadraticCurveTo(x + 5, staffTop + lineSpacing * 3, x + 2, staffTop + lineSpacing * 3.7);
-        ctx.lineWidth = 2.5;
-        ctx.stroke();
-    } else if (noteType === NOTE_TYPES.EIGHTH) {
-        // Eighth rest: diagonal line with one flag
-        const startY = staffTop + lineSpacing;
-        ctx.beginPath();
-        // Dot/flag at top
-        ctx.arc(x + 2, startY + 2, 3, 0, 2 * Math.PI);
-        ctx.fill();
-        // Diagonal stem
-        ctx.beginPath();
-        ctx.moveTo(x + 2, startY + 4);
-        ctx.lineTo(x - 3, startY + lineSpacing * 2);
-        ctx.lineWidth = 2;
-        ctx.stroke();
-    } else if (noteType === NOTE_TYPES.SIXTEENTH) {
-        // Sixteenth rest: diagonal line with two flags
-        const startY = staffTop + lineSpacing * 0.5;
-        // First dot/flag
-        ctx.beginPath();
-        ctx.arc(x + 2, startY + 2, 3, 0, 2 * Math.PI);
-        ctx.fill();
-        // Second dot/flag
-        ctx.beginPath();
-        ctx.arc(x + 1, startY + lineSpacing + 2, 3, 0, 2 * Math.PI);
-        ctx.fill();
-        // Diagonal stem
-        ctx.beginPath();
-        ctx.moveTo(x + 1, startY + lineSpacing + 4);
-        ctx.lineTo(x - 4, startY + lineSpacing * 2.5);
-        ctx.lineWidth = 2;
-        ctx.stroke();
-    }
-
-    // Draw dot for dotted rests
-    if (dotted) {
-        ctx.beginPath();
-        ctx.arc(x + 10, staffMiddleY, 2, 0, 2 * Math.PI);
-        ctx.fill();
-    }
-
-    ctx.restore();
-}
-
-// Draw ledger lines for notes outside the staff
-function drawLedgerLines(ctx, x, y, staffTop, lineSpacing, clef) {
-    ctx.save();
-    ctx.strokeStyle = '#666';
-    ctx.lineWidth = 1;
-
-    const bottomLine = staffTop + 4 * lineSpacing;
-    const topLine = staffTop;
-
-    // Draw ledger lines below staff
-    if (y > bottomLine + lineSpacing / 2) {
-        for (let ly = bottomLine + lineSpacing; ly <= y + lineSpacing / 2; ly += lineSpacing) {
-            ctx.beginPath();
-            ctx.moveTo(x - 12, ly);
-            ctx.lineTo(x + 12, ly);
-            ctx.stroke();
-        }
-    }
-
-    // Draw ledger lines above staff
-    if (y < topLine - lineSpacing / 2) {
-        for (let ly = topLine - lineSpacing; ly >= y - lineSpacing / 2; ly -= lineSpacing) {
-            ctx.beginPath();
-            ctx.moveTo(x - 12, ly);
-            ctx.lineTo(x + 12, ly);
-            ctx.stroke();
-        }
-    }
-
-    ctx.restore();
 }
 
 // Calculate total sequence duration in ms
@@ -1962,9 +1257,9 @@ function stopPreview() {
     if (!sequenceState.isPreviewing) return;
 
     // Stop current audio
-    if (currentPreviewAudio) {
-        currentPreviewAudio.stop();
-        currentPreviewAudio = null;
+    if (audioState.currentPreviewAudio) {
+        audioState.currentPreviewAudio.stop();
+        audioState.currentPreviewAudio = null;
     }
 
     sequenceState.isPreviewing = false;
@@ -2014,7 +1309,7 @@ function previewSequence() {
             previewBtn.textContent = 'Preview';
             previewBtn.classList.remove('recording');
             goBtn.disabled = false;
-            currentPreviewAudio = null;
+            audioState.currentPreviewAudio = null;
             stopPreviewScrollAnimation();
             drawSheetMusic(-1, -1); // Reset highlighting
             return;
@@ -2056,12 +1351,12 @@ async function startSequence() {
         await new Promise(resolve => setTimeout(resolve, 100));
         const ctx = getAudioContext();
 
-        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const source = ctx.createMediaStreamSource(micStream);
+        audioState.micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const source = ctx.createMediaStreamSource(audioState.micStream);
 
-        analyser = ctx.createAnalyser();
-        analyser.fftSize = 4096;
-        source.connect(analyser);
+        audioState.analyser = ctx.createAnalyser();
+        audioState.analyser.fftSize = 4096;
+        source.connect(audioState.analyser);
 
         // Reset state
         sequenceState.currentNoteIndex = 0;
@@ -2069,7 +1364,7 @@ async function startSequence() {
         sequenceState.pitchSamplesForNote = [];
         sequenceState.pitchHistory = [];
         sequenceState.timeOnPitch = 0;
-        recentPitches.length = 0;
+        pitchDetection.recentPitches.length = 0;
         userScrollState.offset = 0;
         // Clear final trace display from previous run
         sequenceState.showFinalTrace = false;
@@ -2247,7 +1542,7 @@ function runCountdown() {
             sequenceState.globalPitchTrace = [];
             lastPlaybackBeat = -1; // Reset beat tracker for pulse
             lastSequenceSampleTime = 0;
-            animationId = requestAnimationFrame(analyzeSequence);
+            appState.animationId = requestAnimationFrame(analyzeSequence);
             return;
         }
 
@@ -2327,14 +1622,14 @@ function stopSequence() {
     sequenceState.isPlaying = false;
     sequenceState.isCountingDown = false;
 
-    if (animationId) {
-        cancelAnimationFrame(animationId);
-        animationId = null;
+    if (appState.animationId) {
+        cancelAnimationFrame(appState.animationId);
+        appState.animationId = null;
     }
 
-    if (micStream) {
-        micStream.getTracks().forEach(track => track.stop());
-        micStream = null;
+    if (audioState.micStream) {
+        audioState.micStream.getTracks().forEach(track => track.stop());
+        audioState.micStream = null;
     }
 
     previewBtn.disabled = false;
@@ -2383,7 +1678,7 @@ function analyzeSequence(timestamp) {
         sequenceState.pitchSamplesForNote = [];
         sequenceState.pitchHistory = [];
         sequenceState.timeOnPitch = 0;
-        recentPitches.length = 0;
+        pitchDetection.recentPitches.length = 0;
     }
 
     // Pulse on beats - calculate directly from elapsed time for accurate beat timing
@@ -2401,10 +1696,10 @@ function analyzeSequence(timestamp) {
 
         // Skip pitch detection during rests
         if (!currentNote.isRest) {
-            const buffer = new Float32Array(analyser.fftSize);
-            analyser.getFloatTimeDomainData(buffer);
+            const buffer = new Float32Array(audioState.analyser.fftSize);
+            audioState.analyser.getFloatTimeDomainData(buffer);
 
-            const rawPitch = detectPitch(buffer, audioContext.sampleRate);
+            const rawPitch = detectPitch(buffer, audioState.context.sampleRate);
 
             if (rawPitch !== -1 && rawPitch > 80 && rawPitch < 1000) {
                 const pitch = getSmoothedPitch(rawPitch);
@@ -2432,7 +1727,7 @@ function analyzeSequence(timestamp) {
     // Draw integrated visualization on sheet music
     drawSheetMusic(sequenceState.currentNoteIndex, sequenceState.currentNoteIndex, sequenceState.noteScores, playbackTime);
 
-    animationId = requestAnimationFrame(analyzeSequence);
+    appState.animationId = requestAnimationFrame(analyzeSequence);
 }
 
 // Finalize scoring for current note (called when advancing to next note)
@@ -2665,7 +1960,7 @@ function drawSequenceVisualization(elapsed, totalDuration) {
     const history = sequenceState.pitchHistory;
 
     // Calculate expected samples for this note's duration
-    const expectedSamples = Math.ceil((totalDuration / 1000) * samplesPerSecond);
+    const expectedSamples = Math.ceil((totalDuration / 1000) * PITCH_CONFIG.samplesPerSecond);
 
     for (let i = 0; i < history.length; i++) {
         const cents = history[i];
@@ -2959,54 +2254,6 @@ function getNoteRange() {
     return notes;
 }
 
-// Draw a scaled treble clef for mini-staff using SVG path
-function drawTrebleClefMini(ctx, x, staffTop, lineSpacing) {
-    ctx.save();
-    ctx.fillStyle = '#999';
-
-    // Scale based on line spacing (base scale 0.50 for lineSpacing=10)
-    const scale = (lineSpacing / 10) * 0.50;
-    const offsetX = x - 4 * (lineSpacing / 10);
-    // The G-circle in the SVG needs to align with G line (staffTop + 3*lineSpacing)
-    const offsetY = staffTop - 1.75 * lineSpacing;
-
-    ctx.translate(offsetX, offsetY);
-    ctx.scale(scale, scale);
-
-    const path = new Path2D(TREBLE_CLEF_PATH);
-    ctx.fill(path);
-
-    ctx.restore();
-}
-
-// Draw a scaled bass clef for mini-staff using SVG path
-function drawBassClefMini(ctx, x, staffTop, lineSpacing) {
-    ctx.save();
-    ctx.fillStyle = '#999';
-
-    // Scale 0.75 for lineSpacing=10, position to align with F line
-    const scale = (lineSpacing / 10) * 0.75;
-    const offsetX = x + 6 * (lineSpacing / 10);
-    const offsetY = staffTop - 0.3 * lineSpacing;
-
-    ctx.translate(offsetX, offsetY);
-    ctx.scale(scale, scale);
-
-    // Draw main body
-    const path = new Path2D(BASS_CLEF_PATH);
-    ctx.fill(path);
-
-    // Draw two dots (positions from original SVG)
-    ctx.beginPath();
-    ctx.arc(36, 9.5, 5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(36, 22.6, 5, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.restore();
-}
-
 // Get display name for a note with accidental
 function getNoteDisplayName(note, octave) {
     // Handle sharp notation (C# -> C♯4)
@@ -3093,36 +2340,6 @@ function drawMiniStaff(ctx, canvas, note, octave) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
     ctx.fillText(getNoteDisplayName(note, octave), noteX, height - 9);
-}
-
-// Draw ledger lines for mini-staff
-function drawMiniLedgerLines(ctx, x, y, staffTop, lineSpacing) {
-    ctx.save();
-    ctx.strokeStyle = '#666';
-    ctx.lineWidth = 1;
-
-    const bottomLine = staffTop + 4 * lineSpacing;
-    const topLine = staffTop;
-
-    if (y > bottomLine + lineSpacing / 2) {
-        for (let ly = bottomLine + lineSpacing; ly <= y + lineSpacing / 2; ly += lineSpacing) {
-            ctx.beginPath();
-            ctx.moveTo(x - 6, ly);
-            ctx.lineTo(x + 6, ly);
-            ctx.stroke();
-        }
-    }
-
-    if (y < topLine - lineSpacing / 2) {
-        for (let ly = topLine - lineSpacing; ly >= y - lineSpacing / 2; ly -= lineSpacing) {
-            ctx.beginPath();
-            ctx.moveTo(x - 6, ly);
-            ctx.lineTo(x + 6, ly);
-            ctx.stroke();
-        }
-    }
-
-    ctx.restore();
 }
 
 // Draw a mini-staff for results breakdown with context notes (prev/next shown faded)
@@ -3452,35 +2669,6 @@ function drawBreakdownMiniStaff(canvas, sequence, noteIndex, noteScore) {
     }
 }
 
-// Draw a selectable note on grand staff (hollow whole note with hover state)
-function drawSelectableNote(ctx, x, y, isHovered, isSelected) {
-    ctx.save();
-
-    // Determine color
-    let noteColor;
-    if (isSelected) {
-        noteColor = '#4ecdc4';
-    } else if (isHovered) {
-        noteColor = '#6bcb77';
-    } else {
-        noteColor = '#bbb';
-    }
-    ctx.strokeStyle = noteColor;
-    ctx.fillStyle = noteColor;
-
-    // Note head (hollow whole note style)
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.ellipse(x, y, 7, 5, 0, 0, 2 * Math.PI);
-    if (isSelected || isHovered) {
-        ctx.fill();
-    } else {
-        ctx.stroke();
-    }
-
-    ctx.restore();
-}
-
 // Draw grand staff selector with all notes from E2 to G5
 function drawGrandStaffSelector() {
     const canvas = grandStaffCanvas;
@@ -3594,38 +2782,6 @@ function drawGrandStaffSelector() {
             height: 20
         });
     });
-}
-
-// Draw ledger lines for grand staff (handles middle C area)
-function drawGrandStaffLedgerLines(ctx, x, y, staffTop, lineSpacing) {
-    ctx.save();
-    ctx.strokeStyle = '#666';
-    ctx.lineWidth = 1;
-
-    const bottomLine = staffTop + 4 * lineSpacing;
-    const topLine = staffTop;
-
-    // Below staff
-    if (y > bottomLine + lineSpacing / 2) {
-        for (let ly = bottomLine + lineSpacing; ly <= y + lineSpacing / 2; ly += lineSpacing) {
-            ctx.beginPath();
-            ctx.moveTo(x - 10, ly);
-            ctx.lineTo(x + 10, ly);
-            ctx.stroke();
-        }
-    }
-
-    // Above staff
-    if (y < topLine - lineSpacing / 2) {
-        for (let ly = topLine - lineSpacing; ly >= y - lineSpacing / 2; ly -= lineSpacing) {
-            ctx.beginPath();
-            ctx.moveTo(x - 10, ly);
-            ctx.lineTo(x + 10, ly);
-            ctx.stroke();
-        }
-    }
-
-    ctx.restore();
 }
 
 // Get note at canvas position (hit detection)

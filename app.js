@@ -74,7 +74,12 @@ import {
 
 import {
     loadPreferences,
-    savePreference
+    savePreference,
+    loadCustomSequences,
+    saveCustomSequence,
+    updateCustomSequence,
+    deleteCustomSequence,
+    findCustomSequenceByName
 } from './js/storage/index.js';
 
 // Legacy alias for backward compatibility within this file
@@ -561,6 +566,111 @@ function applyStoredPreferences() {
 // Apply preferences immediately
 const storedPrefs = applyStoredPreferences();
 
+// ============================================================================
+// Custom Sequence Management
+// ============================================================================
+
+/**
+ * Add a custom sequence option to the dropdown
+ * @param {string} id - Sequence ID
+ * @param {string} name - Display name
+ */
+function addCustomSequenceToDropdown(id, name) {
+    const customOption = sequenceSelect.querySelector('option[value="custom"]');
+    const option = document.createElement('option');
+    option.value = id;
+    option.textContent = `📁 ${name}`;
+    option.dataset.custom = 'true';
+    // Insert before the "Custom (Import)" option
+    sequenceSelect.insertBefore(option, customOption);
+}
+
+/**
+ * Remove a custom sequence option from the dropdown
+ * @param {string} id - Sequence ID
+ */
+function removeCustomSequenceFromDropdown(id) {
+    const option = sequenceSelect.querySelector(`option[value="${id}"]`);
+    if (option) {
+        option.remove();
+    }
+    // Also remove from sequences registry
+    delete sequences[id];
+}
+
+/**
+ * Initialize saved custom sequences on startup
+ */
+function initializeSavedSequences() {
+    const savedSequences = loadCustomSequences();
+    savedSequences.forEach(seq => {
+        // Add to sequences registry
+        sequences[seq.id] = {
+            name: seq.name,
+            notes: seq.notes,
+            timeSignature: seq.timeSignature,
+            tempo: seq.tempo
+        };
+        // Add to dropdown
+        addCustomSequenceToDropdown(seq.id, seq.name);
+    });
+}
+
+/**
+ * Check if current selection is a custom sequence
+ * @returns {boolean}
+ */
+function isCustomSequenceSelected() {
+    const option = sequenceSelect.selectedOptions[0];
+    return option && option.dataset.custom === 'true';
+}
+
+/**
+ * Delete the currently selected custom sequence
+ */
+function deleteSelectedCustomSequence() {
+    const selectedId = sequenceSelect.value;
+    const option = sequenceSelect.selectedOptions[0];
+
+    if (!option || option.dataset.custom !== 'true') {
+        return;
+    }
+
+    const name = option.textContent.replace('📁 ', '');
+    if (!confirm(`Delete "${name}"?`)) {
+        return;
+    }
+
+    // Remove from storage
+    deleteCustomSequence(selectedId);
+
+    // Remove from dropdown and registry
+    removeCustomSequenceFromDropdown(selectedId);
+
+    // Select a built-in sequence
+    sequenceSelect.value = 'simple-scale';
+    loadSequence('simple-scale');
+    savePreference('selectedSequence', 'simple-scale');
+
+    // Hide delete button
+    updateDeleteButtonVisibility();
+}
+
+/**
+ * Update delete button visibility based on selection
+ */
+function updateDeleteButtonVisibility() {
+    if (deleteSequenceBtn) {
+        deleteSequenceBtn.style.display = isCustomSequenceSelected() ? '' : 'none';
+    }
+}
+
+// Create delete button (will be added to DOM after sequence selector is available)
+let deleteSequenceBtn = null;
+
+// Initialize saved sequences
+initializeSavedSequences();
+
 // Beat indicator animation
 let beatIndicatorInterval = null;
 
@@ -648,8 +758,15 @@ function loadSequence(id) {
         };
     });
 
-    // Reset time signature and source tempo for built-in sequences (not custom, which sets them before calling this)
-    if (id !== 'custom') {
+    // Set time signature and source tempo based on sequence type
+    if (id === 'custom') {
+        // Import slot - timeSignature and sourceTempo already set by loadCustomSequenceFromImport
+    } else if (id.startsWith('custom-')) {
+        // Saved custom sequence - use stored values
+        sequenceState.timeSignature = seq.timeSignature || { beats: 4, beatType: 4 };
+        sequenceState.sourceTempo = seq.tempo || 120;
+    } else {
+        // Built-in sequences
         sequenceState.timeSignature = { beats: 4, beatType: 4 };
         sequenceState.sourceTempo = 90; // Built-in sequences are defined at 90 BPM
     }
@@ -1825,24 +1942,30 @@ modeFreeBtn.addEventListener('click', () => setMode('free'));
 modeSequenceBtn.addEventListener('click', () => setMode('sequence'));
 
 sequenceSelect.addEventListener('change', () => {
-    const isCustom = sequenceSelect.value === 'custom';
-    musicxmlImport.style.display = isCustom ? '' : 'none';
-    // Hide part selector when not in custom mode
-    if (!isCustom) {
+    const isImportSlot = sequenceSelect.value === 'custom';
+    const isSavedCustom = isCustomSequenceSelected();
+
+    musicxmlImport.style.display = isImportSlot ? '' : 'none';
+    // Hide part selector when not in import mode
+    if (!isImportSlot) {
         musicxmlPartSelector.style.display = 'none';
     }
 
-    if (!isCustom) {
-        loadSequence(sequenceSelect.value);
-        savePreference('selectedSequence', sequenceSelect.value);
-    } else {
-        // Clear sheet music if no custom sequence loaded yet
+    // Update delete button visibility
+    updateDeleteButtonVisibility();
+
+    if (isImportSlot) {
+        // Import slot - clear sheet music if no custom sequence loaded yet
         if (sequences['custom'].notes.length === 0) {
             sequenceState.currentSequence = [];
             drawSheetMusic();
         } else {
             loadSequence('custom');
         }
+    } else {
+        // Built-in or saved custom sequence
+        loadSequence(sequenceSelect.value);
+        savePreference('selectedSequence', sequenceSelect.value);
     }
 });
 
@@ -1898,6 +2021,22 @@ retryBtn.addEventListener('click', () => {
     startSequence();
 });
 
+// Create and add delete button for custom sequences
+deleteSequenceBtn = document.createElement('button');
+deleteSequenceBtn.id = 'delete-sequence-btn';
+deleteSequenceBtn.className = 'delete-sequence-btn';
+deleteSequenceBtn.textContent = '🗑️ Delete';
+deleteSequenceBtn.title = 'Delete this custom sequence';
+deleteSequenceBtn.style.display = 'none';
+deleteSequenceBtn.addEventListener('click', deleteSelectedCustomSequence);
+
+// Insert after the sequence selector
+const sequenceSelectorDiv = sequenceSelect.parentElement;
+sequenceSelectorDiv.appendChild(deleteSequenceBtn);
+
+// Initialize delete button visibility
+updateDeleteButtonVisibility();
+
 // MusicXML file import handler
 // Store parsed MusicXML document for part selection
 let currentMusicXMLDoc = null;
@@ -1920,7 +2059,7 @@ musicxmlFile.addEventListener('change', async (e) => {
         if (parts.length === 1) {
             // Single part - load directly
             const result = parseMusicXMLPart(doc, parts[0].id);
-            loadCustomSequence(result.notes, file.name, result.timeSignature, result.tempo);
+            loadCustomSequenceFromImport(result.notes, file.name, result.timeSignature, result.tempo);
         } else {
             // Multiple parts - show selector and auto-load first part
             musicxmlPartSelect.innerHTML = parts.map(p =>
@@ -1930,7 +2069,7 @@ musicxmlFile.addEventListener('change', async (e) => {
 
             // Auto-load the first part
             const result = parseMusicXMLPart(doc, parts[0].id);
-            loadCustomSequence(result.notes, file.name, result.timeSignature, result.tempo);
+            loadCustomSequenceFromImport(result.notes, file.name, result.timeSignature, result.tempo);
         }
     } catch (err) {
         console.error('MusicXML parse error:', err);
@@ -1947,38 +2086,93 @@ musicxmlPartSelect.addEventListener('change', () => {
     const partId = musicxmlPartSelect.value;
     try {
         const result = parseMusicXMLPart(currentMusicXMLDoc, partId);
-        loadCustomSequence(result.notes, currentMusicXMLFilename, result.timeSignature, result.tempo);
+        loadCustomSequenceFromImport(result.notes, currentMusicXMLFilename, result.timeSignature, result.tempo);
     } catch (err) {
         console.error('MusicXML parse error:', err);
         sequenceStatus.textContent = `Error: ${err.message}`;
     }
 });
 
-// Helper to load custom sequence
-function loadCustomSequence(notes, filename, timeSignature = null, tempo = 120) {
-    sequences['custom'].notes = notes;
+// Helper to load and persist custom sequence
+function loadCustomSequenceFromImport(notes, filename, timeSignature = null, tempo = 120) {
+    const ts = timeSignature || { beats: 4, beatType: 4 };
+    const partName = musicxmlPartSelector.style.display !== 'none'
+        ? ` (${musicxmlPartSelect.options[musicxmlPartSelect.selectedIndex].text})`
+        : '';
+    const displayName = partName ? `${filename}${partName}` : filename;
 
-    // Store time signature (default to 4/4 if not provided)
-    sequenceState.timeSignature = timeSignature || { beats: 4, beatType: 4 };
+    // Check if a sequence with this name already exists
+    const existing = findCustomSequenceByName(displayName);
+    let sequenceId;
 
-    // Store source tempo (the BPM at which durations were calculated)
+    if (existing) {
+        // Ask for confirmation to overwrite
+        if (!confirm(`"${displayName}" already exists. Overwrite it?`)) {
+            return;
+        }
+        // Update existing sequence
+        updateCustomSequence(existing.id, {
+            notes,
+            timeSignature: ts,
+            tempo
+        });
+        sequenceId = existing.id;
+
+        // Update sequences registry
+        sequences[sequenceId].notes = notes;
+        sequences[sequenceId].timeSignature = ts;
+        sequences[sequenceId].tempo = tempo;
+    } else {
+        // Save new sequence
+        sequenceId = saveCustomSequence({
+            name: displayName,
+            notes,
+            timeSignature: ts,
+            tempo
+        });
+
+        if (!sequenceId) {
+            sequenceStatus.textContent = 'Error: Failed to save sequence';
+            return;
+        }
+
+        // Add to sequences registry
+        sequences[sequenceId] = {
+            name: displayName,
+            notes,
+            timeSignature: ts,
+            tempo
+        };
+
+        // Add to dropdown
+        addCustomSequenceToDropdown(sequenceId, displayName);
+    }
+
+    // Select the new/updated sequence
+    sequenceSelect.value = sequenceId;
+
+    // Store time signature and tempo
+    sequenceState.timeSignature = ts;
     sequenceState.sourceTempo = tempo;
 
-    // Set starting note selector to match the first note of the custom sequence
+    // Set starting note selector to match the first note
     if (notes.length > 0) {
         const firstNote = notes[0];
         startNoteSelect.value = firstNote.note;
         startOctaveSelect.value = firstNote.octave.toString();
     }
 
-    loadSequence('custom');
+    // Load and display
+    loadSequence(sequenceId);
+    savePreference('selectedSequence', sequenceId);
 
-    const partName = musicxmlPartSelector.style.display !== 'none'
-        ? ` (${musicxmlPartSelect.options[musicxmlPartSelect.selectedIndex].text})`
-        : '';
-    sequenceStatus.textContent = `Loaded ${notes.length} notes from ${filename}${partName}`;
+    // Update delete button visibility
+    updateDeleteButtonVisibility();
+
+    // Show status
+    sequenceStatus.textContent = `${existing ? 'Updated' : 'Saved'} ${notes.length} notes from ${displayName}`;
     setTimeout(() => {
-        if (sequenceStatus.textContent.startsWith('Loaded')) {
+        if (sequenceStatus.textContent.startsWith('Saved') || sequenceStatus.textContent.startsWith('Updated')) {
             sequenceStatus.textContent = '';
         }
     }, 3000);

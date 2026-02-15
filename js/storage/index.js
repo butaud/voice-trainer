@@ -16,6 +16,7 @@ export {
     updateCustomSequence,
     deleteCustomSequence,
     getCustomSequence,
+    findCustomSequenceByName,
     clearCustomSequences,
     getStorageSize
 } from './sequences.js';

@@ -107,6 +107,16 @@ export function getCustomSequence(id) {
 }
 
 /**
+ * Find a custom sequence by name
+ * @param {string} name - Sequence name
+ * @returns {Object|null} Sequence object or null if not found
+ */
+export function findCustomSequenceByName(name) {
+    const sequences = loadCustomSequences();
+    return sequences.find(s => s.name === name) || null;
+}
+
+/**
  * Clear all custom sequences
  */
 export function clearCustomSequences() {

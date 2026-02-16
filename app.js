@@ -2046,8 +2046,11 @@ musicxmlFile.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    musicxmlFilename.textContent = file.name;
-    currentMusicXMLFilename = file.name;
+    // Store file name before resetting input
+    const fileName = file.name;
+
+    musicxmlFilename.textContent = fileName;
+    currentMusicXMLFilename = fileName;
     sequenceStatus.textContent = 'Loading...';
     musicxmlPartSelector.style.display = 'none';
 
@@ -2059,7 +2062,7 @@ musicxmlFile.addEventListener('change', async (e) => {
         if (parts.length === 1) {
             // Single part - load directly
             const result = parseMusicXMLPart(doc, parts[0].id);
-            loadCustomSequenceFromImport(result.notes, file.name, result.timeSignature, result.tempo);
+            loadCustomSequenceFromImport(result.notes, fileName, result.timeSignature, result.tempo);
         } else {
             // Multiple parts - show selector and auto-load first part
             musicxmlPartSelect.innerHTML = parts.map(p =>
@@ -2069,7 +2072,7 @@ musicxmlFile.addEventListener('change', async (e) => {
 
             // Auto-load the first part
             const result = parseMusicXMLPart(doc, parts[0].id);
-            loadCustomSequenceFromImport(result.notes, file.name, result.timeSignature, result.tempo);
+            loadCustomSequenceFromImport(result.notes, fileName, result.timeSignature, result.tempo);
         }
     } catch (err) {
         console.error('MusicXML parse error:', err);
@@ -2077,6 +2080,9 @@ musicxmlFile.addEventListener('change', async (e) => {
         musicxmlFilename.textContent = '';
         currentMusicXMLDoc = null;
     }
+
+    // Reset file input so the same file can be selected again
+    e.target.value = '';
 });
 
 // Handle part selection
@@ -2108,6 +2114,12 @@ function loadCustomSequenceFromImport(notes, filename, timeSignature = null, tem
     if (existing) {
         // Ask for confirmation to overwrite
         if (!confirm(`"${displayName}" already exists. Overwrite it?`)) {
+            // User cancelled - restore previous state
+            sequenceStatus.textContent = '';
+            // Re-select and reload the existing sequence to refresh the display
+            sequenceSelect.value = existing.id;
+            loadSequence(existing.id);
+            updateDeleteButtonVisibility();
             return;
         }
         // Update existing sequence

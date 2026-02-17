@@ -58,6 +58,7 @@ import {
     drawBassClefMini,
     drawNote,
     drawRest,
+    drawTie,
     drawLedgerLines,
     drawSelectableNote,
     drawGrandStaffLedgerLines,
@@ -990,6 +991,69 @@ function getPlaybackProgress(elapsedTime, scrollParams) {
 
 // =============================================================================
 
+// Helper: draw a single note (or tied note group) at position x
+function drawNoteOrTied(ctx, note, x, staffTop, lineSpacing, clef, staffMiddleY, isActive, isCompleted, noteScores, noteIndex, pulseAmount, noteSpacing) {
+    if (note.isRest) {
+        drawRest(ctx, x, staffTop, lineSpacing, isActive, isCompleted, note.noteType || NOTE_TYPES.QUARTER, note.dotted || false, pulseAmount);
+        return;
+    }
+
+    const staffPos = getStaffPosition(note.note, note.octave);
+    const y = getYForStaffPosition(staffPos, clef, staffTop, lineSpacing);
+    const isSharp = note.note.includes('#');
+    const score = noteScores && noteScores[noteIndex] ? noteScores[noteIndex].score : null;
+    const stemDown = y <= staffMiddleY;
+
+    if (note.tiedNotes) {
+        // Draw tied note components as separate noteheads
+        const totalDuration = note.duration;
+        // Calculate total allocated width proportional to note spacing
+        // Use a reasonable width based on duration ratios
+        const componentCount = note.tiedNotes.length;
+
+        // Determine color for tie arcs (match note color logic)
+        let tieColor;
+        if (score !== null) {
+            tieColor = score >= 70 ? '#6bcb77' : score >= 40 ? '#ffd93d' : '#ff6b6b';
+        } else if (isActive) {
+            tieColor = '#4ecdc4';
+        } else if (isCompleted) {
+            tieColor = '#6bcb77';
+        } else {
+            tieColor = '#bbb';
+        }
+
+        // Place first notehead at x (normal position), spread subsequent ones rightward.
+        // x is the center of the allocated space, so available room is noteSpacing/2.
+        const rightEdge = noteSpacing * 0.4; // 80% of the half-space to avoid crowding next note
+        let cumulativeDur = 0;
+        const compXPositions = [];
+        for (const comp of note.tiedNotes) {
+            const frac = cumulativeDur / totalDuration;
+            compXPositions.push(x + frac * rightEdge);
+            cumulativeDur += comp.duration;
+        }
+
+        for (let t = 0; t < componentCount; t++) {
+            const compX = compXPositions[t];
+
+            drawLedgerLines(ctx, compX, y, staffTop, lineSpacing, clef);
+            drawNote(ctx, compX, y, t === 0 ? isSharp : false, isActive, isCompleted, staffMiddleY, score,
+                note.tiedNotes[t].noteType || NOTE_TYPES.QUARTER, note.tiedNotes[t].dotted || false,
+                t === 0 ? pulseAmount : 0);
+
+            // Draw tie arc between consecutive noteheads
+            if (t > 0) {
+                drawTie(ctx, compXPositions[t - 1], compX, y, stemDown, tieColor);
+            }
+        }
+    } else {
+        // Simple note — draw as before
+        drawLedgerLines(ctx, x, y, staffTop, lineSpacing, clef);
+        drawNote(ctx, x, y, isSharp, isActive, isCompleted, staffMiddleY, score, note.noteType || NOTE_TYPES.QUARTER, note.dotted || false, pulseAmount);
+    }
+}
+
 // Main function to draw sheet music
 function drawSheetMusic(activeIndex = -1, completedUpTo = -1, noteScores = null, playbackTime = -1, showFinalTrace = false, noteOffsetX = 0, previewScrollOffset = 0) {
     const canvas = sheetMusicCanvas;
@@ -1079,21 +1143,7 @@ function drawSheetMusic(activeIndex = -1, completedUpTo = -1, noteScores = null,
         const isCompleted = i < completedUpTo;
         const pulseAmount = isActive ? activePulseAmount : 0;
 
-        if (note.isRest) {
-            // Draw rest symbol
-            drawRest(ctx, x, staffTop, lineSpacing, isActive, isCompleted, note.noteType || NOTE_TYPES.QUARTER, note.dotted || false, pulseAmount);
-        } else {
-            const staffPos = getStaffPosition(note.note, note.octave);
-            const y = getYForStaffPosition(staffPos, clef, staffTop, lineSpacing);
-            const isSharp = note.note.includes('#');
-            const score = noteScores && noteScores[i] ? noteScores[i].score : null;
-
-            // Draw ledger lines if needed
-            drawLedgerLines(ctx, x, y, staffTop, lineSpacing, clef);
-
-            // Draw the note
-            drawNote(ctx, x, y, isSharp, isActive, isCompleted, staffMiddleY, score, note.noteType || NOTE_TYPES.QUARTER, note.dotted || false, pulseAmount);
-        }
+        drawNoteOrTied(ctx, note, x, staffTop, lineSpacing, clef, staffMiddleY, isActive, isCompleted, noteScores, i, pulseAmount, notePositions[i].spacing);
     }
 
     // Draw scroll indicators if song is scrollable in idle mode
@@ -1164,17 +1214,7 @@ function drawSheetMusic(activeIndex = -1, completedUpTo = -1, noteScores = null,
                 const isCompleted = i < completedUpTo;
                 const pulseAmount = isActive ? activePulseAmount : 0;
 
-                if (note.isRest) {
-                    drawRest(ctx, x, staffTop, lineSpacing, isActive, isCompleted, note.noteType || NOTE_TYPES.QUARTER, note.dotted || false, pulseAmount);
-                } else {
-                    const staffPos = getStaffPosition(note.note, note.octave);
-                    const y = getYForStaffPosition(staffPos, clef, staffTop, lineSpacing);
-                    const isSharp = note.note.includes('#');
-                    const score = noteScores && noteScores[i] ? noteScores[i].score : null;
-
-                    drawLedgerLines(ctx, x, y, staffTop, lineSpacing, clef);
-                    drawNote(ctx, x, y, isSharp, isActive, isCompleted, staffMiddleY, score, note.noteType || NOTE_TYPES.QUARTER, note.dotted || false, pulseAmount);
-                }
+                drawNoteOrTied(ctx, note, x, staffTop, lineSpacing, clef, staffMiddleY, isActive, isCompleted, noteScores, i, pulseAmount, notePositions[i].spacing);
             }
         }
 

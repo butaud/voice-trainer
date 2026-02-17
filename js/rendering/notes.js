@@ -265,6 +265,35 @@ export function drawRest(ctx, x, staffTop, lineSpacing, isActive, isCompleted, n
 }
 
 /**
+ * Draw a tie arc between two noteheads
+ * @param {CanvasRenderingContext2D} ctx - Canvas context
+ * @param {number} x1 - X position of first notehead
+ * @param {number} x2 - X position of second notehead
+ * @param {number} y - Y position of noteheads (same pitch)
+ * @param {boolean} stemDown - Whether stems point down (arc curves up) or up (arc curves down)
+ * @param {string} color - Stroke color for the tie
+ */
+export function drawTie(ctx, x1, x2, y, stemDown, color) {
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+
+    // Arc direction: if stem is down, arc curves upward; if stem is up, arc curves downward
+    const arcDirection = stemDown ? -1 : 1;
+    const arcHeight = 8;
+    const midX = (x1 + x2) / 2;
+    const cp1x = x1 + (x2 - x1) * 0.2;
+    const cp2x = x1 + (x2 - x1) * 0.8;
+    const cpY = y + arcDirection * arcHeight;
+
+    ctx.moveTo(x1 + 7, y);
+    ctx.bezierCurveTo(cp1x, cpY, cp2x, cpY, x2 - 7, y);
+    ctx.stroke();
+    ctx.restore();
+}
+
+/**
  * Draw ledger lines for notes outside the staff
  * @param {CanvasRenderingContext2D} ctx - Canvas context
  * @param {number} x - X position of note

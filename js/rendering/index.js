@@ -16,6 +16,7 @@ export {
 export {
     drawNote,
     drawRest,
+    drawTie,
     drawLedgerLines,
     drawSelectableNote,
     drawGrandStaffLedgerLines,

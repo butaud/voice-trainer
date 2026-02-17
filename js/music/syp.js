@@ -171,8 +171,13 @@ export function parseSYPPart(text, voiceId) {
             const noteInfo = parseNoteToken(token, octaveLookup, defaultDuration, activeAccidentals, metadata.key, metadata.mode, metadata.tempo);
             if (noteInfo) {
                 if (tieNext && notes.length > 0 && !noteInfo.isRest) {
-                    // Add this note's duration to the previous note (tie)
-                    notes[notes.length - 1].duration += noteInfo.duration;
+                    // Tie: preserve visual components while summing duration
+                    const prevNote = notes[notes.length - 1];
+                    if (!prevNote.tiedNotes) {
+                        prevNote.tiedNotes = [{ noteType: prevNote.noteType, dotted: prevNote.dotted, duration: prevNote.duration }];
+                    }
+                    prevNote.tiedNotes.push({ noteType: noteInfo.noteType, dotted: noteInfo.dotted, duration: noteInfo.duration });
+                    prevNote.duration += noteInfo.duration;
                     tieNext = false;
                 } else {
                     notes.push(noteInfo);

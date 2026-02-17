@@ -68,8 +68,8 @@ export function semitoneToNote(semitone) {
  * @returns {number} Staff position (C0 = 0, D0 = 1, etc.)
  */
 export function getStaffPosition(note, octave) {
-    // Get base note without sharp
-    const baseNote = note.replace('#', '');
+    // Get base note without accidental
+    const baseNote = note.replace(/[#b]/, '');
     // Position relative to C0: octave * 7 + diatonic position
     return octave * 7 + DIATONIC_POSITION[baseNote];
 }

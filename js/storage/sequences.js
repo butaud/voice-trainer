@@ -40,6 +40,7 @@ export function saveCustomSequence(sequence) {
         const sequences = loadCustomSequences();
         const id = generateId();
         const newSequence = {
+            ...sequence,
             id,
             name: sequence.name || 'Untitled',
             notes: sequence.notes || [],

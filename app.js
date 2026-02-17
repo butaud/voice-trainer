@@ -31,6 +31,11 @@ import {
 } from './js/music/musicxml.js';
 
 import {
+    getSYPParts,
+    parseSYPPart
+} from './js/music/syp.js';
+
+import {
     BUILTIN_SEQUENCE_TEMPO,
     audioState,
     appState,
@@ -605,12 +610,17 @@ function initializeSavedSequences() {
     const savedSequences = loadCustomSequences();
     savedSequences.forEach(seq => {
         // Add to sequences registry
-        sequences[seq.id] = {
+        const entry = {
             name: seq.name,
             notes: seq.notes,
             timeSignature: seq.timeSignature,
             tempo: seq.tempo
         };
+        if (seq.parts) {
+            entry.parts = seq.parts;
+            entry.selectedPart = seq.selectedPart;
+        }
+        sequences[seq.id] = entry;
         // Add to dropdown
         addCustomSequenceToDropdown(seq.id, seq.name);
     });
@@ -649,6 +659,7 @@ function deleteSelectedCustomSequence() {
 
     // Select a built-in sequence
     sequenceSelect.value = 'simple-scale';
+    resetStartingNoteToSequence(sequences['simple-scale']);
     loadSequence('simple-scale');
     savePreference('selectedSequence', 'simple-scale');
 
@@ -719,9 +730,20 @@ function setMode(mode) {
         if (appState.isRunning) {
             stop();
         }
+        resetStartingNoteToSequence(sequences[sequenceSelect.value]);
         loadSequence(sequenceSelect.value);
     }
     savePreference('mode', mode);
+}
+
+// Reset starting note selector to match a sequence's first note
+function resetStartingNoteToSequence(seq) {
+    if (!seq || seq.notes.length === 0) return;
+    const firstNote = seq.notes.find(n => !n.isRest);
+    if (!firstNote) return;
+    const { note: dropdownNote, octave: dropdownOctave } = flatToSharpEquivalent(firstNote.note, firstNote.octave);
+    startNoteSelect.value = dropdownNote;
+    startOctaveSelect.value = dropdownOctave.toString();
 }
 
 // Load sequence with transposition based on selected starting note
@@ -1946,8 +1968,17 @@ sequenceSelect.addEventListener('change', () => {
     const isSavedCustom = isCustomSequenceSelected();
 
     musicxmlImport.style.display = isImportSlot ? '' : 'none';
-    // Hide part selector when not in import mode
-    if (!isImportSlot) {
+
+    // Show part selector for saved multi-part sequences, hide otherwise
+    if (isSavedCustom && sequences[sequenceSelect.value]?.parts &&
+        Object.keys(sequences[sequenceSelect.value].parts).length > 1) {
+        const seq = sequences[sequenceSelect.value];
+        musicxmlPartSelect.innerHTML = Object.entries(seq.parts).map(([id, part]) =>
+            `<option value="${id}">${part.name}</option>`
+        ).join('');
+        musicxmlPartSelect.value = seq.selectedPart;
+        musicxmlPartSelector.style.display = '';
+    } else if (!isImportSlot) {
         musicxmlPartSelector.style.display = 'none';
     }
 
@@ -1960,10 +1991,12 @@ sequenceSelect.addEventListener('change', () => {
             sequenceState.currentSequence = [];
             drawSheetMusic();
         } else {
+            resetStartingNoteToSequence(sequences['custom']);
             loadSequence('custom');
         }
     } else {
         // Built-in or saved custom sequence
+        resetStartingNoteToSequence(sequences[sequenceSelect.value]);
         loadSequence(sequenceSelect.value);
         savePreference('selectedSequence', sequenceSelect.value);
     }
@@ -2037,75 +2070,96 @@ sequenceSelectorDiv.appendChild(deleteSequenceBtn);
 // Initialize delete button visibility
 updateDeleteButtonVisibility();
 
-// MusicXML file import handler
-// Store parsed MusicXML document for part selection
-let currentMusicXMLDoc = null;
-let currentMusicXMLFilename = '';
-
+// Music file import handler
 musicxmlFile.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    // Store file name before resetting input
     const fileName = file.name;
-
     musicxmlFilename.textContent = fileName;
-    currentMusicXMLFilename = fileName;
     sequenceStatus.textContent = 'Loading...';
     musicxmlPartSelector.style.display = 'none';
 
+    // Detect file format by extension
+    const isSYP = fileName.toLowerCase().endsWith('.syp') || fileName.toLowerCase().endsWith('.syp.txt');
+
     try {
         const text = await file.text();
-        const { doc, parts } = getMusicXMLParts(text);
-        currentMusicXMLDoc = doc;
 
-        if (parts.length === 1) {
-            // Single part - load directly
-            const result = parseMusicXMLPart(doc, parts[0].id);
-            loadCustomSequenceFromImport(result.notes, fileName, result.timeSignature, result.tempo);
+        // Parse all parts upfront
+        let rawParts;
+        let parsePart;
+        if (isSYP) {
+            const { parts } = getSYPParts(text);
+            rawParts = parts;
+            parsePart = (id) => parseSYPPart(text, id);
         } else {
-            // Multiple parts - show selector and auto-load first part
-            musicxmlPartSelect.innerHTML = parts.map(p =>
-                `<option value="${p.id}">${p.name}</option>`
-            ).join('');
-            musicxmlPartSelector.style.display = '';
-
-            // Auto-load the first part
-            const result = parseMusicXMLPart(doc, parts[0].id);
-            loadCustomSequenceFromImport(result.notes, fileName, result.timeSignature, result.tempo);
+            const { doc, parts } = getMusicXMLParts(text);
+            rawParts = parts;
+            parsePart = (id) => parseMusicXMLPart(doc, id);
         }
+
+        // Build parts object with pre-parsed data
+        const allParts = {};
+        for (const p of rawParts) {
+            const result = parsePart(p.id);
+            allParts[p.id] = {
+                name: p.name,
+                notes: result.notes,
+                timeSignature: result.timeSignature || { beats: 4, beatType: 4 },
+                tempo: result.tempo || 120
+            };
+        }
+
+        const selectedPart = rawParts[0].id;
+        loadCustomSequenceFromImport(allParts, selectedPart, fileName);
     } catch (err) {
-        console.error('MusicXML parse error:', err);
+        console.error('Music file parse error:', err);
         sequenceStatus.textContent = `Error: ${err.message}`;
         musicxmlFilename.textContent = '';
-        currentMusicXMLDoc = null;
     }
 
     // Reset file input so the same file can be selected again
     e.target.value = '';
 });
 
-// Handle part selection
+// Handle part selection for saved multi-part sequences
 musicxmlPartSelect.addEventListener('change', () => {
-    if (!currentMusicXMLDoc) return;
-
     const partId = musicxmlPartSelect.value;
-    try {
-        const result = parseMusicXMLPart(currentMusicXMLDoc, partId);
-        loadCustomSequenceFromImport(result.notes, currentMusicXMLFilename, result.timeSignature, result.tempo);
-    } catch (err) {
-        console.error('MusicXML parse error:', err);
-        sequenceStatus.textContent = `Error: ${err.message}`;
-    }
+    const selectedId = sequenceSelect.value;
+    const seq = sequences[selectedId];
+
+    if (!seq?.parts?.[partId]) return;
+
+    const part = seq.parts[partId];
+
+    // Update active notes/timeSignature/tempo
+    seq.notes = part.notes;
+    seq.timeSignature = part.timeSignature;
+    seq.tempo = part.tempo;
+    seq.selectedPart = partId;
+
+    // Persist to localStorage
+    updateCustomSequence(selectedId, {
+        notes: part.notes,
+        timeSignature: part.timeSignature,
+        tempo: part.tempo,
+        selectedPart: partId
+    });
+
+    // Update tempo display
+    sequenceState.timeSignature = part.timeSignature;
+    sequenceState.sourceTempo = part.tempo;
+
+    // Reload
+    resetStartingNoteToSequence(seq);
+    loadSequence(selectedId);
 });
 
-// Helper to load and persist custom sequence
-function loadCustomSequenceFromImport(notes, filename, timeSignature = null, tempo = 120) {
-    const ts = timeSignature || { beats: 4, beatType: 4 };
-    const partName = musicxmlPartSelector.style.display !== 'none'
-        ? ` (${musicxmlPartSelect.options[musicxmlPartSelect.selectedIndex].text})`
-        : '';
-    const displayName = partName ? `${filename}${partName}` : filename;
+// Helper to load and persist custom sequence from import
+function loadCustomSequenceFromImport(parts, selectedPart, filename) {
+    const activePart = parts[selectedPart];
+    const displayName = filename;
 
     // Check if a sequence with this name already exists
     const existing = findCustomSequenceByName(displayName);
@@ -2116,31 +2170,37 @@ function loadCustomSequenceFromImport(notes, filename, timeSignature = null, tem
         if (!confirm(`"${displayName}" already exists. Overwrite it?`)) {
             // User cancelled - restore previous state
             sequenceStatus.textContent = '';
-            // Re-select and reload the existing sequence to refresh the display
             sequenceSelect.value = existing.id;
+            resetStartingNoteToSequence(sequences[existing.id]);
             loadSequence(existing.id);
             updateDeleteButtonVisibility();
             return;
         }
         // Update existing sequence
         updateCustomSequence(existing.id, {
-            notes,
-            timeSignature: ts,
-            tempo
+            parts,
+            selectedPart,
+            notes: activePart.notes,
+            timeSignature: activePart.timeSignature,
+            tempo: activePart.tempo
         });
         sequenceId = existing.id;
 
         // Update sequences registry
-        sequences[sequenceId].notes = notes;
-        sequences[sequenceId].timeSignature = ts;
-        sequences[sequenceId].tempo = tempo;
+        sequences[sequenceId].parts = parts;
+        sequences[sequenceId].selectedPart = selectedPart;
+        sequences[sequenceId].notes = activePart.notes;
+        sequences[sequenceId].timeSignature = activePart.timeSignature;
+        sequences[sequenceId].tempo = activePart.tempo;
     } else {
         // Save new sequence
         sequenceId = saveCustomSequence({
             name: displayName,
-            notes,
-            timeSignature: ts,
-            tempo
+            parts,
+            selectedPart,
+            notes: activePart.notes,
+            timeSignature: activePart.timeSignature,
+            tempo: activePart.tempo
         });
 
         if (!sequenceId) {
@@ -2151,9 +2211,11 @@ function loadCustomSequenceFromImport(notes, filename, timeSignature = null, tem
         // Add to sequences registry
         sequences[sequenceId] = {
             name: displayName,
-            notes,
-            timeSignature: ts,
-            tempo
+            parts,
+            selectedPart,
+            notes: activePart.notes,
+            timeSignature: activePart.timeSignature,
+            tempo: activePart.tempo
         };
 
         // Add to dropdown
@@ -2164,17 +2226,22 @@ function loadCustomSequenceFromImport(notes, filename, timeSignature = null, tem
     sequenceSelect.value = sequenceId;
 
     // Store time signature and tempo
-    sequenceState.timeSignature = ts;
-    sequenceState.sourceTempo = tempo;
+    sequenceState.timeSignature = activePart.timeSignature;
+    sequenceState.sourceTempo = activePart.tempo;
 
-    // Set starting note selector to match the first note
-    if (notes.length > 0) {
-        const firstNote = notes[0];
-        startNoteSelect.value = firstNote.note;
-        startOctaveSelect.value = firstNote.octave.toString();
+    // Show part selector if multi-part
+    if (Object.keys(parts).length > 1) {
+        musicxmlPartSelect.innerHTML = Object.entries(parts).map(([id, part]) =>
+            `<option value="${id}">${part.name}</option>`
+        ).join('');
+        musicxmlPartSelect.value = selectedPart;
+        musicxmlPartSelector.style.display = '';
+    } else {
+        musicxmlPartSelector.style.display = 'none';
     }
 
-    // Load and display
+    // Reset starting note and load
+    resetStartingNoteToSequence(sequences[sequenceId]);
     loadSequence(sequenceId);
     savePreference('selectedSequence', sequenceId);
 
@@ -2182,7 +2249,7 @@ function loadCustomSequenceFromImport(notes, filename, timeSignature = null, tem
     updateDeleteButtonVisibility();
 
     // Show status
-    sequenceStatus.textContent = `${existing ? 'Updated' : 'Saved'} ${notes.length} notes from ${displayName}`;
+    sequenceStatus.textContent = `${existing ? 'Updated' : 'Saved'} ${activePart.notes.length} notes from ${displayName}`;
     setTimeout(() => {
         if (sequenceStatus.textContent.startsWith('Saved') || sequenceStatus.textContent.startsWith('Updated')) {
             sequenceStatus.textContent = '';
@@ -2197,7 +2264,9 @@ setTimeout(() => {
         setMode('free');
     } else {
         // Song mode is default, just load the sequence
-        loadSequence(sequenceSelect.value || 'simple-scale');
+        const initId = sequenceSelect.value || 'simple-scale';
+        resetStartingNoteToSequence(sequences[initId]);
+        loadSequence(initId);
     }
 }, 100);
 

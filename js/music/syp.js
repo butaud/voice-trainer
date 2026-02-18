@@ -144,11 +144,20 @@ export function parseSYPPart(text, voiceId) {
     const notes = [];
     let currentMeasure = -1;
     let activeAccidentals = {}; // Track accidentals within measure
+    let pickupDuration = 0; // Duration of pickup (anacrusis) measure, if any
+    let measure0NoteCount = 0; // Track notes added during measure 0
 
     for (const line of lines) {
         // Check for measure marker
         const measureMatch = line.match(/^measure\s+(\d+)/i);
         if (measureMatch) {
+            // When leaving measure 0, compute pickup duration from the notes added
+            if (currentMeasure === 0 && measure0NoteCount > 0) {
+                pickupDuration = 0;
+                for (let i = notes.length - measure0NoteCount; i < notes.length; i++) {
+                    pickupDuration += notes[i].duration;
+                }
+            }
             currentMeasure = parseInt(measureMatch[1]);
             activeAccidentals = {}; // Reset accidentals at measure boundary
             continue;
@@ -181,6 +190,7 @@ export function parseSYPPart(text, voiceId) {
                     tieNext = false;
                 } else {
                     notes.push(noteInfo);
+                    if (currentMeasure === 0) measure0NoteCount++;
                     tieNext = false;
                 }
             }
@@ -190,7 +200,8 @@ export function parseSYPPart(text, voiceId) {
     return {
         notes,
         timeSignature: metadata.timeSignature,
-        tempo: metadata.tempo
+        tempo: metadata.tempo,
+        pickupDuration
     };
 }
 

@@ -615,7 +615,8 @@ function initializeSavedSequences() {
             name: seq.name,
             notes: seq.notes,
             timeSignature: seq.timeSignature,
-            tempo: seq.tempo
+            tempo: seq.tempo,
+            pickupDuration: seq.pickupDuration || 0
         };
         if (seq.parts) {
             entry.parts = seq.parts;
@@ -793,6 +794,9 @@ function loadSequence(id) {
         sequenceState.timeSignature = { beats: 4, beatType: 4 };
         sequenceState.sourceTempo = 90; // Built-in sequences are defined at 90 BPM
     }
+
+    // Use stored pickup duration (set during import from SYP measure 0)
+    sequenceState.pickupDuration = seq.pickupDuration || 0;
 
     // Reset user scroll when sequence changes
     userScrollState.offset = 0;
@@ -1453,6 +1457,12 @@ function runCountdown() {
     const beatIntervalSec = beatIntervalMs / 1000;
     sequenceState.countdownBeatInterval = beatIntervalMs; // Store for use during playback
 
+    // Compute adjusted pickup duration at current tempo.
+    // The effective countdown duration (time from first click to playback start)
+    // is shorter by the pickup amount, since the pickup note begins before the downbeat.
+    const adjustedPickup = getAdjustedDuration(sequenceState.pickupDuration);
+    sequenceState.countdownDuration = beatIntervalMs * 3 - adjustedPickup;
+
     // Add lead-in silence to let mobile audio fully initialize
     const leadInSec = 1.5;
     const leadInMs = leadInSec * 1000;
@@ -1502,8 +1512,12 @@ function runCountdown() {
 
         const elapsed = now - countdownStartTime;
         const currentBeat = Math.floor(elapsed / beatIntervalMs);
-        const totalCountdownTime = beatIntervalMs * 3; // 3 beats total (3-2-1, then GO at first note)
-        const progress = Math.min(elapsed / totalCountdownTime, 1); // 0 to 1
+
+        // With a pickup, playback starts adjustedPickup ms before the 3rd beat boundary.
+        // The scroll progress should reach 1.0 exactly when playback starts, so the
+        // first note arrives at the playhead seamlessly.
+        const playbackStartTime = beatIntervalMs * 3 - adjustedPickup;
+        const progress = Math.min(elapsed / playbackStartTime, 1); // 0 to 1
 
         // Update beat display and trigger pulse only when beat changes
         if (currentBeat !== lastDisplayedBeat) {
@@ -1522,8 +1536,8 @@ function runCountdown() {
         const displayNumber = currentBeat < 3 ? 3 - currentBeat : 0;
         drawCountdownVisualization(displayNumber, progress);
 
-        // Check if countdown is complete (after 3 beats) - GO appears right at first note
-        if (elapsed >= beatIntervalMs * 3) {
+        // Check if countdown is complete
+        if (elapsed >= playbackStartTime) {
             sequenceStatus.textContent = 'Sing!';
             sequenceState.isCountingDown = false;
             sequenceState.isPlaying = true;
@@ -1556,10 +1570,9 @@ function drawCountdownVisualization(count, progress = 0) {
 
     // Calculate scroll rate to match playback speed
     // With duration-based spacing, scroll rate is constant: totalNotesWidth / totalDuration
-    // In 3 beats, we scroll: countdownDuration * (totalNotesWidth / totalDuration)
-    const countdownDuration = 3 * sequenceState.countdownBeatInterval;
+    // Scroll distance matches the effective countdown duration (accounts for pickup)
     const scrollRate = totalNotesWidth / totalDuration; // pixels per ms
-    const maxOffset = countdownDuration * scrollRate;
+    const maxOffset = sequenceState.countdownDuration * scrollRate;
     const noteOffsetX = maxOffset * (1 - progress);
 
     // Draw sheet music with first note highlighted and offset applied
@@ -1670,9 +1683,12 @@ function analyzeSequence(timestamp) {
         pitchDetection.recentPitches.length = 0;
     }
 
-    // Pulse on beats - calculate directly from elapsed time for accurate beat timing
-    const currentBeat = Math.floor(playbackTime / sequenceState.countdownBeatInterval);
-    if (currentBeat !== lastPlaybackBeat) {
+    // Pulse on beats - calculate directly from elapsed time for accurate beat timing.
+    // Offset by adjusted pickup duration so beats align with actual measure downbeats.
+    const adjustedPickup = getAdjustedDuration(sequenceState.pickupDuration);
+    const beatAlignedTime = playbackTime - adjustedPickup;
+    const currentBeat = Math.floor(beatAlignedTime / sequenceState.countdownBeatInterval);
+    if (currentBeat !== lastPlaybackBeat && beatAlignedTime >= 0) {
         lastPlaybackBeat = currentBeat;
         triggerBeatPulse();
     }
@@ -2147,7 +2163,8 @@ musicxmlFile.addEventListener('change', async (e) => {
                 name: p.name,
                 notes: result.notes,
                 timeSignature: result.timeSignature || { beats: 4, beatType: 4 },
-                tempo: result.tempo || 120
+                tempo: result.tempo || 120,
+                pickupDuration: result.pickupDuration || 0
             };
         }
 
@@ -2177,6 +2194,7 @@ musicxmlPartSelect.addEventListener('change', () => {
     seq.notes = part.notes;
     seq.timeSignature = part.timeSignature;
     seq.tempo = part.tempo;
+    seq.pickupDuration = part.pickupDuration || 0;
     seq.selectedPart = partId;
 
     // Persist to localStorage
@@ -2184,6 +2202,7 @@ musicxmlPartSelect.addEventListener('change', () => {
         notes: part.notes,
         timeSignature: part.timeSignature,
         tempo: part.tempo,
+        pickupDuration: part.pickupDuration || 0,
         selectedPart: partId
     });
 
@@ -2222,7 +2241,8 @@ function loadCustomSequenceFromImport(parts, selectedPart, filename) {
             selectedPart,
             notes: activePart.notes,
             timeSignature: activePart.timeSignature,
-            tempo: activePart.tempo
+            tempo: activePart.tempo,
+            pickupDuration: activePart.pickupDuration || 0
         });
         sequenceId = existing.id;
 
@@ -2232,6 +2252,7 @@ function loadCustomSequenceFromImport(parts, selectedPart, filename) {
         sequences[sequenceId].notes = activePart.notes;
         sequences[sequenceId].timeSignature = activePart.timeSignature;
         sequences[sequenceId].tempo = activePart.tempo;
+        sequences[sequenceId].pickupDuration = activePart.pickupDuration || 0;
     } else {
         // Save new sequence
         sequenceId = saveCustomSequence({
@@ -2240,7 +2261,8 @@ function loadCustomSequenceFromImport(parts, selectedPart, filename) {
             selectedPart,
             notes: activePart.notes,
             timeSignature: activePart.timeSignature,
-            tempo: activePart.tempo
+            tempo: activePart.tempo,
+            pickupDuration: activePart.pickupDuration || 0
         });
 
         if (!sequenceId) {
@@ -2255,7 +2277,8 @@ function loadCustomSequenceFromImport(parts, selectedPart, filename) {
             selectedPart,
             notes: activePart.notes,
             timeSignature: activePart.timeSignature,
-            tempo: activePart.tempo
+            tempo: activePart.tempo,
+            pickupDuration: activePart.pickupDuration || 0
         };
 
         // Add to dropdown

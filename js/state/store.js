@@ -72,6 +72,7 @@ export const sequenceState = {
     globalPitchTrace: [],
     timeSignature: { beats: 4, beatType: 4 },
     sourceTempo: 90,
+    pickupDuration: 0,
     showFinalTrace: false
 };
 

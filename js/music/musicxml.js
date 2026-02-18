@@ -95,6 +95,20 @@ export function parseMusicXMLPart(doc, partId) {
         if (beatTypeEl) timeBeatType = parseInt(beatTypeEl.textContent);
     }
 
+    // Parse key signature from <fifths>
+    let key = 'C';
+    const keyEl = doc.querySelector('key fifths');
+    if (keyEl) {
+        const fifths = parseInt(keyEl.textContent);
+        const sharpKeyNames = ['C', 'G', 'D', 'A', 'E', 'B', 'F#', 'C#'];
+        const flatKeyNames = ['C', 'F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb', 'Cb'];
+        if (fifths >= 0 && fifths <= 7) {
+            key = sharpKeyNames[fifths];
+        } else if (fifths < 0 && fifths >= -7) {
+            key = flatKeyNames[-fifths];
+        }
+    }
+
     // Calculate ms per division
     const msPerBeat = 60000 / tempo; // ms per quarter note
     const msPerDivision = msPerBeat / divisions;
@@ -157,7 +171,7 @@ export function parseMusicXMLPart(doc, partId) {
                 let noteName = step;
                 if (alter === 1) noteName += '#';
                 else if (alter === -1) {
-                    // Convert flat to equivalent sharp
+                    // Convert flat to equivalent sharp for internal consistency
                     if (FLAT_TO_SHARP[step]) {
                         noteName = FLAT_TO_SHARP[step];
                     }
@@ -182,6 +196,7 @@ export function parseMusicXMLPart(doc, partId) {
     return {
         notes: notes,
         timeSignature: { beats: timeBeats, beatType: timeBeatType },
-        tempo: tempo  // The BPM at which durations were calculated
+        tempo: tempo,  // The BPM at which durations were calculated
+        key: key
     };
 }

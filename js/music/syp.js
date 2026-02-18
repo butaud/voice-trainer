@@ -201,7 +201,8 @@ export function parseSYPPart(text, voiceId) {
         notes,
         timeSignature: metadata.timeSignature,
         tempo: metadata.tempo,
-        pickupDuration
+        pickupDuration,
+        key: metadata.key || 'C'
     };
 }
 
@@ -435,30 +436,34 @@ function parseDuration(durationNum, dottedChar, defaultDuration) {
 }
 
 /**
+ * Key signature lookup tables (exported for rendering)
+ */
+export const KEY_SHARP_MAP = {
+    'G': ['F'],
+    'D': ['F', 'C'],
+    'A': ['F', 'C', 'G'],
+    'E': ['F', 'C', 'G', 'D'],
+    'B': ['F', 'C', 'G', 'D', 'A'],
+    'F#': ['F', 'C', 'G', 'D', 'A', 'E'],
+    'C#': ['F', 'C', 'G', 'D', 'A', 'E', 'B']
+};
+
+export const KEY_FLAT_MAP = {
+    'F': ['B'],
+    'Bb': ['B', 'E'],
+    'Eb': ['B', 'E', 'A'],
+    'Ab': ['B', 'E', 'A', 'D'],
+    'Db': ['B', 'E', 'A', 'D', 'G'],
+    'Gb': ['B', 'E', 'A', 'D', 'G', 'C'],
+    'Cb': ['B', 'E', 'A', 'D', 'G', 'C', 'F']
+};
+
+/**
  * Apply key signature accidentals to a note
  */
 function applyKeySignature(noteName, key, mode) {
-    // Sharp keys and their sharped notes
-    const sharpKeys = {
-        'G': ['F'],
-        'D': ['F', 'C'],
-        'A': ['F', 'C', 'G'],
-        'E': ['F', 'C', 'G', 'D'],
-        'B': ['F', 'C', 'G', 'D', 'A'],
-        'F#': ['F', 'C', 'G', 'D', 'A', 'E'],
-        'C#': ['F', 'C', 'G', 'D', 'A', 'E', 'B']
-    };
-
-    // Flat keys and their flatted notes
-    const flatKeys = {
-        'F': ['B'],
-        'Bb': ['B', 'E'],
-        'Eb': ['B', 'E', 'A'],
-        'Ab': ['B', 'E', 'A', 'D'],
-        'Db': ['B', 'E', 'A', 'D', 'G'],
-        'Gb': ['B', 'E', 'A', 'D', 'G', 'C'],
-        'Cb': ['B', 'E', 'A', 'D', 'G', 'C', 'F']
-    };
+    const sharpKeys = KEY_SHARP_MAP;
+    const flatKeys = KEY_FLAT_MAP;
 
     // Check if this note should be sharped
     if (sharpKeys[key] && sharpKeys[key].includes(noteName)) {

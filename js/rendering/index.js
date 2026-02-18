@@ -20,7 +20,9 @@ export {
     drawLedgerLines,
     drawSelectableNote,
     drawGrandStaffLedgerLines,
-    drawMiniLedgerLines
+    drawMiniLedgerLines,
+    drawKeySignature,
+    getKeySignatureAccidentals
 } from './notes.js';
 
 // Mini staff rendering

@@ -3,13 +3,14 @@
  */
 
 import { NOTE_TYPES } from '../music/constants.js';
+import { KEY_SHARP_MAP, KEY_FLAT_MAP } from '../music/syp.js';
 
 /**
  * Draw a note with stem (supports different note types)
  * @param {CanvasRenderingContext2D} ctx - Canvas context
  * @param {number} x - X position
  * @param {number} y - Y position
- * @param {boolean} isSharp - Whether to draw sharp symbol
+ * @param {string|boolean|null} accidental - Accidental to display: 'sharp', 'flat', 'natural', null, or boolean (legacy: true=sharp)
  * @param {boolean} isActive - Whether note is currently active
  * @param {boolean} isCompleted - Whether note has been sung
  * @param {number} staffMiddleY - Y position of middle staff line (for stem direction)
@@ -18,7 +19,10 @@ import { NOTE_TYPES } from '../music/constants.js';
  * @param {boolean} dotted - Whether note is dotted
  * @param {number} pulseAmount - Pulse animation amount (0-1)
  */
-export function drawNote(ctx, x, y, isSharp, isActive, isCompleted, staffMiddleY, score = null, noteType = NOTE_TYPES.QUARTER, dotted = false, pulseAmount = 0) {
+export function drawNote(ctx, x, y, accidental, isActive, isCompleted, staffMiddleY, score = null, noteType = NOTE_TYPES.QUARTER, dotted = false, pulseAmount = 0) {
+    // Normalize legacy boolean parameter
+    if (accidental === true) accidental = 'sharp';
+    if (accidental === false) accidental = null;
     ctx.save();
 
     // Determine colors
@@ -151,12 +155,18 @@ export function drawNote(ctx, x, y, isSharp, isActive, isCompleted, staffMiddleY
         ctx.fill();
     }
 
-    // Draw sharp if needed
-    if (isSharp) {
+    // Draw accidental if needed
+    if (accidental) {
         ctx.font = 'bold 14px serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText('\u266F', x - 16, y);
+        if (accidental === 'sharp') {
+            ctx.fillText('\u266F', x - 16, y);
+        } else if (accidental === 'flat') {
+            ctx.fillText('\u266D', x - 16, y);
+        } else if (accidental === 'natural') {
+            ctx.fillText('\u266E', x - 16, y);
+        }
     }
 
     ctx.restore();
@@ -441,4 +451,75 @@ export function drawMiniLedgerLines(ctx, x, y, staffTop, lineSpacing) {
     }
 
     ctx.restore();
+}
+
+/**
+ * Draw key signature on the staff (sharps or flats after the clef)
+ * @param {CanvasRenderingContext2D} ctx - Canvas context
+ * @param {number} x - Starting X position (after clef)
+ * @param {number} staffTop - Y position of top staff line
+ * @param {number} lineSpacing - Spacing between staff lines
+ * @param {string} clef - 'treble' or 'bass'
+ * @param {string} key - Key name (e.g., 'G', 'F', 'Bb', 'C')
+ * @returns {number} Width consumed by the key signature
+ */
+export function drawKeySignature(ctx, x, staffTop, lineSpacing, clef, key) {
+    if (!key || key === 'C') return 0;
+
+    const sharps = KEY_SHARP_MAP[key];
+    const flats = KEY_FLAT_MAP[key];
+
+    if (!sharps && !flats) return 0;
+
+    // Staff positions as distance from top line in lineSpacing units
+    // Treble clef lines top-to-bottom: F5(0), D5(1), B4(2), G4(3), E4(4)
+    // Spaces: E5(0.5), C5(1.5), A4(2.5), F4(3.5)
+
+    // Treble clef sharp positions (standard order: F C G D A E B)
+    const trebleSharpPos = [0, 1.5, -0.5, 1, 2.5, 0.5, 2]; // F5, C5, G5, D5, A4, E5, B4
+    // Treble clef flat positions (standard order: B E A D G C F)
+    const trebleFlatPos = [2, 0.5, 2.5, 1, 3, 1.5, 3.5]; // B4, E5, A4, D5, G4, C5, F4
+
+    // Bass clef: shift down 1 position
+    const bassOffset = 1;
+
+    const isSharpKey = !!sharps;
+    const accidentals = sharps || flats;
+    const positions = isSharpKey ? trebleSharpPos : trebleFlatPos;
+    const symbol = isSharpKey ? '\u266F' : '\u266D';
+
+    ctx.save();
+    ctx.fillStyle = '#bbb';
+    ctx.font = 'bold 14px serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    const spacing = 10;
+    let offsetX = 5;
+
+    for (let i = 0; i < accidentals.length; i++) {
+        let pos = positions[i];
+        if (clef === 'bass') pos += bassOffset;
+        // Wrap positions that go above staff to an octave lower
+        if (pos < 0) pos += 3.5;
+
+        const y = staffTop + pos * lineSpacing;
+        ctx.fillText(symbol, x + offsetX, y);
+        offsetX += spacing;
+    }
+
+    ctx.restore();
+    return offsetX;
+}
+
+/**
+ * Get the set of accidental note letters for a given key signature
+ * @param {string} key - Key name (e.g., 'G', 'Bb', 'C')
+ * @returns {{type: string|null, notes: string[]}} Accidental type and affected note letters
+ */
+export function getKeySignatureAccidentals(key) {
+    if (!key || key === 'C') return { type: null, notes: [] };
+    if (KEY_SHARP_MAP[key]) return { type: 'sharp', notes: KEY_SHARP_MAP[key] };
+    if (KEY_FLAT_MAP[key]) return { type: 'flat', notes: KEY_FLAT_MAP[key] };
+    return { type: null, notes: [] };
 }

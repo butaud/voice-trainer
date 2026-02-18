@@ -73,6 +73,7 @@ export const sequenceState = {
     timeSignature: { beats: 4, beatType: 4 },
     sourceTempo: 90,
     pickupDuration: 0,
+    key: 'C',
     showFinalTrace: false
 };
 

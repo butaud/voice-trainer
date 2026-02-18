@@ -63,6 +63,8 @@ import {
     drawSelectableNote,
     drawGrandStaffLedgerLines,
     drawMiniLedgerLines,
+    drawKeySignature,
+    getKeySignatureAccidentals,
     getNoteDisplayName,
     drawMiniStaff
 } from './js/rendering/index.js';
@@ -616,7 +618,8 @@ function initializeSavedSequences() {
             notes: seq.notes,
             timeSignature: seq.timeSignature,
             tempo: seq.tempo,
-            pickupDuration: seq.pickupDuration || 0
+            pickupDuration: seq.pickupDuration || 0,
+            key: seq.key || 'C'
         };
         if (seq.parts) {
             entry.parts = seq.parts;
@@ -798,6 +801,9 @@ function loadSequence(id) {
     // Use stored pickup duration (set during import from SYP measure 0)
     sequenceState.pickupDuration = seq.pickupDuration || 0;
 
+    // Use stored key signature
+    sequenceState.key = seq.key || 'C';
+
     // Reset user scroll when sequence changes
     userScrollState.offset = 0;
 
@@ -875,11 +881,11 @@ function getCumulativeTime(upToIndex) {
 // Calculate all scroll-related layout parameters for a sequence
 // Returns object with layout metrics that can be used by any mode
 // Uses duration-based spacing: longer notes get more horizontal space
-function calculateScrollParameters(sequence, canvasWidth) {
+function calculateScrollParameters(sequence, canvasWidth, keySignatureWidth = 0) {
     const leftMargin = 15;
     const clefWidth = 40;
     const rightMargin = 15;
-    const noteAreaWidth = canvasWidth - leftMargin - clefWidth - rightMargin;
+    const noteAreaWidth = canvasWidth - leftMargin - clefWidth - keySignatureWidth - rightMargin;
     const minNoteSpacing = 28; // Minimum spacing for the shortest note
 
     // Find minimum duration to use as baseline for spacing
@@ -898,8 +904,8 @@ function calculateScrollParameters(sequence, canvasWidth) {
     // Calculate total width needed for all notes
     const totalNotesWidth = noteSpacings.reduce((sum, s) => sum + s, 0);
 
-    // Starting X position (leave room for half of first note's spacing)
-    const notesStartX = leftMargin + clefWidth + noteSpacings[0] / 2;
+    // Starting X position (leave room for key signature and half of first note's spacing)
+    const notesStartX = leftMargin + clefWidth + keySignatureWidth + noteSpacings[0] / 2;
 
     // Build note positions with cumulative X based on variable spacing
     const notePositions = [];
@@ -995,8 +1001,51 @@ function getPlaybackProgress(elapsedTime, scrollParams) {
 
 // =============================================================================
 
+// Compute display accidental for a note relative to the key signature
+// Sharp-to-flat equivalence: C# = Db, D# = Eb, F# = Gb, G# = Ab, A# = Bb
+const SHARP_TO_FLAT_LETTER = { 'C#': 'D', 'D#': 'E', 'F#': 'G', 'G#': 'A', 'A#': 'B' };
+const FLAT_LETTER_TO_SHARP = { 'D': 'C#', 'E': 'D#', 'G': 'F#', 'A': 'G#', 'B': 'A#' };
+
+function getDisplayAccidental(noteName, keyAccidentals) {
+    const letter = noteName.charAt(0);
+    const hasSharp = noteName.includes('#');
+    const hasFlat = noteName.includes('b');
+
+    if (keyAccidentals.type === 'sharp') {
+        // Sharp key: key signature sharps certain letters
+        const keyHasThis = keyAccidentals.notes.includes(letter);
+        if (keyHasThis && hasSharp) return null;        // F# in key of G → no accidental
+        if (keyHasThis && !hasSharp && !hasFlat) return 'natural'; // F♮ in key of G → show natural
+        if (hasSharp) return 'sharp';                   // C# in key of G → show sharp
+        if (hasFlat) return 'flat';
+    } else if (keyAccidentals.type === 'flat') {
+        // Flat key: key signature flats certain letters
+        // Notes may be stored as sharps (e.g., A# instead of Bb)
+        // Check if this note's enharmonic flat matches a key signature flat
+        if (hasSharp) {
+            const flatLetter = SHARP_TO_FLAT_LETTER[noteName];
+            if (flatLetter && keyAccidentals.notes.includes(flatLetter)) return null; // A# = Bb in key of F → no accidental
+            return 'sharp'; // accidental not in key sig
+        }
+        if (hasFlat) {
+            if (keyAccidentals.notes.includes(letter)) return null; // Bb in key of F → no accidental
+            return 'flat';
+        }
+        // Natural note — check if key sig would flat this letter
+        if (keyAccidentals.notes.includes(letter)) return 'natural'; // B♮ in key of F → show natural
+        // Also check if this natural note's sharp equivalent matches a key sig flat
+        // e.g., in key of Eb (flats B,E,A): note E natural needs a natural sign
+        // Already handled above
+    } else {
+        // Key of C — show accidentals as-is
+        if (hasSharp) return 'sharp';
+        if (hasFlat) return 'flat';
+    }
+    return null;
+}
+
 // Helper: draw a single note (or tied note group) at position x
-function drawNoteOrTied(ctx, note, x, staffTop, lineSpacing, clef, staffMiddleY, isActive, isCompleted, noteScores, noteIndex, pulseAmount, noteSpacing) {
+function drawNoteOrTied(ctx, note, x, staffTop, lineSpacing, clef, staffMiddleY, isActive, isCompleted, noteScores, noteIndex, pulseAmount, noteSpacing, keyAccidentals) {
     if (note.isRest) {
         drawRest(ctx, x, staffTop, lineSpacing, isActive, isCompleted, note.noteType || NOTE_TYPES.QUARTER, note.dotted || false, pulseAmount);
         return;
@@ -1004,15 +1053,13 @@ function drawNoteOrTied(ctx, note, x, staffTop, lineSpacing, clef, staffMiddleY,
 
     const staffPos = getStaffPosition(note.note, note.octave);
     const y = getYForStaffPosition(staffPos, clef, staffTop, lineSpacing);
-    const isSharp = note.note.includes('#');
+    const accidental = keyAccidentals ? getDisplayAccidental(note.note, keyAccidentals) : (note.note.includes('#') ? 'sharp' : null);
     const score = noteScores && noteScores[noteIndex] ? noteScores[noteIndex].score : null;
     const stemDown = y <= staffMiddleY;
 
     if (note.tiedNotes) {
         // Draw tied note components as separate noteheads
         const totalDuration = note.duration;
-        // Calculate total allocated width proportional to note spacing
-        // Use a reasonable width based on duration ratios
         const componentCount = note.tiedNotes.length;
 
         // Determine color for tie arcs (match note color logic)
@@ -1028,8 +1075,7 @@ function drawNoteOrTied(ctx, note, x, staffTop, lineSpacing, clef, staffMiddleY,
         }
 
         // Place first notehead at x (normal position), spread subsequent ones rightward.
-        // x is the center of the allocated space, so available room is noteSpacing/2.
-        const rightEdge = noteSpacing * 0.4; // 80% of the half-space to avoid crowding next note
+        const rightEdge = noteSpacing * 0.4;
         let cumulativeDur = 0;
         const compXPositions = [];
         for (const comp of note.tiedNotes) {
@@ -1042,7 +1088,7 @@ function drawNoteOrTied(ctx, note, x, staffTop, lineSpacing, clef, staffMiddleY,
             const compX = compXPositions[t];
 
             drawLedgerLines(ctx, compX, y, staffTop, lineSpacing, clef);
-            drawNote(ctx, compX, y, t === 0 ? isSharp : false, isActive, isCompleted, staffMiddleY, score,
+            drawNote(ctx, compX, y, t === 0 ? accidental : null, isActive, isCompleted, staffMiddleY, score,
                 note.tiedNotes[t].noteType || NOTE_TYPES.QUARTER, note.tiedNotes[t].dotted || false,
                 t === 0 ? pulseAmount : 0);
 
@@ -1054,8 +1100,16 @@ function drawNoteOrTied(ctx, note, x, staffTop, lineSpacing, clef, staffMiddleY,
     } else {
         // Simple note — draw as before
         drawLedgerLines(ctx, x, y, staffTop, lineSpacing, clef);
-        drawNote(ctx, x, y, isSharp, isActive, isCompleted, staffMiddleY, score, note.noteType || NOTE_TYPES.QUARTER, note.dotted || false, pulseAmount);
+        drawNote(ctx, x, y, accidental, isActive, isCompleted, staffMiddleY, score, note.noteType || NOTE_TYPES.QUARTER, note.dotted || false, pulseAmount);
     }
+}
+
+// Compute the pixel width of the current key signature (for layout)
+function getKeySignatureWidth() {
+    const key = sequenceState.key || 'C';
+    const keyAcc = getKeySignatureAccidentals(key);
+    if (!keyAcc.type) return 0;
+    return 5 + keyAcc.notes.length * 10; // matches drawKeySignature spacing
 }
 
 // Main function to draw sheet music
@@ -1077,8 +1131,13 @@ function drawSheetMusic(activeIndex = -1, completedUpTo = -1, noteScores = null,
     const lineSpacing = 10;
     const clef = getBestClef(sequence);
 
+    // Compute key signature info
+    const key = sequenceState.key || 'C';
+    const keyAccidentals = getKeySignatureAccidentals(key);
+    const keySignatureWidth = getKeySignatureWidth();
+
     // Use shared scroll parameter calculation
-    const scrollParams = calculateScrollParameters(sequence, width);
+    const scrollParams = calculateScrollParameters(sequence, width, keySignatureWidth);
     const {
         leftMargin, clefWidth, rightMargin, noteSpacing, notesStartX,
         maxNotesVisible, hasEllipsis, maxScrollNeeded, notePositions, totalDuration
@@ -1103,6 +1162,9 @@ function drawSheetMusic(activeIndex = -1, completedUpTo = -1, noteScores = null,
         drawBassClef(ctx, leftMargin, staffTop, lineSpacing);
     }
 
+    // Draw key signature after clef
+    drawKeySignature(ctx, leftMargin + clefWidth, staffTop, lineSpacing, clef, key);
+
     // Middle line of staff (for stem direction)
     const staffMiddleY = staffTop + 2 * lineSpacing;
 
@@ -1119,8 +1181,8 @@ function drawSheetMusic(activeIndex = -1, completedUpTo = -1, noteScores = null,
     // Determine scroll offset to apply for idle user scrolling
     const idleScrollOffset = isIdleMode && hasEllipsis ? userScrollState.offset : 0;
 
-    // Left edge for clipping notes (at the clef)
-    const clipLeftEdge = leftMargin + clefWidth - 5;
+    // Left edge for clipping notes (after clef and key signature)
+    const clipLeftEdge = leftMargin + clefWidth + keySignatureWidth - 5;
 
     // Calculate pulse amount for active note during playback
     // Pulse decays from 1 to 0 over 250ms when a note becomes active
@@ -1147,7 +1209,7 @@ function drawSheetMusic(activeIndex = -1, completedUpTo = -1, noteScores = null,
         const isCompleted = i < completedUpTo;
         const pulseAmount = isActive ? activePulseAmount : 0;
 
-        drawNoteOrTied(ctx, note, x, staffTop, lineSpacing, clef, staffMiddleY, isActive, isCompleted, noteScores, i, pulseAmount, notePositions[i].spacing);
+        drawNoteOrTied(ctx, note, x, staffTop, lineSpacing, clef, staffMiddleY, isActive, isCompleted, noteScores, i, pulseAmount, notePositions[i].spacing, keyAccidentals);
     }
 
     // Draw scroll indicators if song is scrollable in idle mode
@@ -1160,7 +1222,7 @@ function drawSheetMusic(activeIndex = -1, completedUpTo = -1, noteScores = null,
         // Left arrow if scrolled right
         if (userScrollState.offset > 0) {
             ctx.textAlign = 'left';
-            ctx.fillText('◀', leftMargin + clefWidth + 5, indicatorY);
+            ctx.fillText('◀', leftMargin + clefWidth + keySignatureWidth + 5, indicatorY);
         }
 
         // Right arrow if more content to the right
@@ -1207,6 +1269,9 @@ function drawSheetMusic(activeIndex = -1, completedUpTo = -1, noteScores = null,
                 drawBassClef(ctx, leftMargin, staffTop, lineSpacing);
             }
 
+            // Redraw key signature
+            drawKeySignature(ctx, leftMargin + clefWidth, staffTop, lineSpacing, clef, key);
+
             // Redraw notes with scroll offset
             for (let i = 0; i < sequence.length; i++) {
                 const note = sequence[i];
@@ -1218,7 +1283,7 @@ function drawSheetMusic(activeIndex = -1, completedUpTo = -1, noteScores = null,
                 const isCompleted = i < completedUpTo;
                 const pulseAmount = isActive ? activePulseAmount : 0;
 
-                drawNoteOrTied(ctx, note, x, staffTop, lineSpacing, clef, staffMiddleY, isActive, isCompleted, noteScores, i, pulseAmount, notePositions[i].spacing);
+                drawNoteOrTied(ctx, note, x, staffTop, lineSpacing, clef, staffMiddleY, isActive, isCompleted, noteScores, i, pulseAmount, notePositions[i].spacing, keyAccidentals);
             }
         }
 
@@ -1341,7 +1406,7 @@ function previewSequence() {
     const notes = sequenceState.currentSequence;
 
     // Use shared scroll parameter calculation
-    const scrollParams = calculateScrollParameters(notes, sheetMusicCanvas.width);
+    const scrollParams = calculateScrollParameters(notes, sheetMusicCanvas.width, getKeySignatureWidth());
 
     // Start smooth scroll animation with shared params
     startPreviewScrollAnimation(scrollParams);
@@ -1565,7 +1630,7 @@ function drawCountdownVisualization(count, progress = 0) {
     if (sequence.length === 0) return;
 
     // Use shared scroll parameters
-    const scrollParams = calculateScrollParameters(sequence, width);
+    const scrollParams = calculateScrollParameters(sequence, width, getKeySignatureWidth());
     const { notesStartX, minNoteSpacing, minDuration, totalNotesWidth, totalDuration } = scrollParams;
 
     // Calculate scroll rate to match playback speed
@@ -1659,7 +1724,7 @@ function analyzeSequence(timestamp) {
     const playbackTime = timestamp - sequenceState.sequenceStartTime;
 
     // Calculate scroll params and current note from global time (same as playhead)
-    const scrollParams = calculateScrollParameters(sequenceState.currentSequence, sheetMusicCanvas.width);
+    const scrollParams = calculateScrollParameters(sequenceState.currentSequence, sheetMusicCanvas.width, getKeySignatureWidth());
     const progress = getPlaybackProgress(playbackTime, scrollParams);
 
     // Check if sequence is complete
@@ -2164,7 +2229,8 @@ musicxmlFile.addEventListener('change', async (e) => {
                 notes: result.notes,
                 timeSignature: result.timeSignature || { beats: 4, beatType: 4 },
                 tempo: result.tempo || 120,
-                pickupDuration: result.pickupDuration || 0
+                pickupDuration: result.pickupDuration || 0,
+                key: result.key || 'C'
             };
         }
 
@@ -2195,6 +2261,7 @@ musicxmlPartSelect.addEventListener('change', () => {
     seq.timeSignature = part.timeSignature;
     seq.tempo = part.tempo;
     seq.pickupDuration = part.pickupDuration || 0;
+    seq.key = part.key || 'C';
     seq.selectedPart = partId;
 
     // Persist to localStorage
@@ -2203,6 +2270,7 @@ musicxmlPartSelect.addEventListener('change', () => {
         timeSignature: part.timeSignature,
         tempo: part.tempo,
         pickupDuration: part.pickupDuration || 0,
+        key: part.key || 'C',
         selectedPart: partId
     });
 
@@ -2242,7 +2310,8 @@ function loadCustomSequenceFromImport(parts, selectedPart, filename) {
             notes: activePart.notes,
             timeSignature: activePart.timeSignature,
             tempo: activePart.tempo,
-            pickupDuration: activePart.pickupDuration || 0
+            pickupDuration: activePart.pickupDuration || 0,
+            key: activePart.key || 'C'
         });
         sequenceId = existing.id;
 
@@ -2253,6 +2322,7 @@ function loadCustomSequenceFromImport(parts, selectedPart, filename) {
         sequences[sequenceId].timeSignature = activePart.timeSignature;
         sequences[sequenceId].tempo = activePart.tempo;
         sequences[sequenceId].pickupDuration = activePart.pickupDuration || 0;
+        sequences[sequenceId].key = activePart.key || 'C';
     } else {
         // Save new sequence
         sequenceId = saveCustomSequence({
@@ -2262,7 +2332,8 @@ function loadCustomSequenceFromImport(parts, selectedPart, filename) {
             notes: activePart.notes,
             timeSignature: activePart.timeSignature,
             tempo: activePart.tempo,
-            pickupDuration: activePart.pickupDuration || 0
+            pickupDuration: activePart.pickupDuration || 0,
+            key: activePart.key || 'C'
         });
 
         if (!sequenceId) {
@@ -2278,7 +2349,8 @@ function loadCustomSequenceFromImport(parts, selectedPart, filename) {
             notes: activePart.notes,
             timeSignature: activePart.timeSignature,
             tempo: activePart.tempo,
-            pickupDuration: activePart.pickupDuration || 0
+            pickupDuration: activePart.pickupDuration || 0,
+            key: activePart.key || 'C'
         };
 
         // Add to dropdown
@@ -2288,9 +2360,10 @@ function loadCustomSequenceFromImport(parts, selectedPart, filename) {
     // Select the new/updated sequence
     sequenceSelect.value = sequenceId;
 
-    // Store time signature and tempo
+    // Store time signature, tempo, and key
     sequenceState.timeSignature = activePart.timeSignature;
     sequenceState.sourceTempo = activePart.tempo;
+    sequenceState.key = activePart.key || 'C';
 
     // Show part selector if multi-part
     if (Object.keys(parts).length > 1) {
@@ -2338,7 +2411,8 @@ function loadSYPFromQueryParam() {
                 notes: result.notes,
                 timeSignature: result.timeSignature || { beats: 4, beatType: 4 },
                 tempo: result.tempo || 120,
-                pickupDuration: result.pickupDuration || 0
+                pickupDuration: result.pickupDuration || 0,
+                key: result.key || 'C'
             };
         }
 
@@ -2469,7 +2543,8 @@ function drawBreakdownMiniStaff(canvas, sequence, noteIndex, noteScore) {
     function drawMiniNote(note, x, alpha, scoreValue) {
         const pos = getStaffPosition(note.note, note.octave);
         const y = getYForStaffPosition(pos, clef, staffTop, lineSpacing);
-        const isSharp = note.note.includes('#');
+        const miniKeyAcc = getKeySignatureAccidentals(sequenceState.key || 'C');
+        const accidental = miniKeyAcc.type ? getDisplayAccidental(note.note, miniKeyAcc) : (note.note.includes('#') ? 'sharp' : null);
         const noteType = note.noteType || NOTE_TYPES.QUARTER;
         const dotted = note.dotted || false;
 
@@ -2583,11 +2658,17 @@ function drawBreakdownMiniStaff(canvas, sequence, noteIndex, noteScore) {
         }
 
         // Draw accidental
-        if (isSharp) {
+        if (accidental) {
             ctx.font = 'bold 8px serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillText('\u266F', x - 7, y);
+            if (accidental === 'sharp') {
+                ctx.fillText('\u266F', x - 7, y);
+            } else if (accidental === 'flat') {
+                ctx.fillText('\u266D', x - 7, y);
+            } else if (accidental === 'natural') {
+                ctx.fillText('\u266E', x - 7, y);
+            }
         }
 
         ctx.restore();

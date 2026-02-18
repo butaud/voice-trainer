@@ -2320,10 +2320,56 @@ function loadCustomSequenceFromImport(parts, selectedPart, filename) {
     }, 3000);
 }
 
+// Check for syp= query parameter (base64-encoded SYP content)
+function loadSYPFromQueryParam() {
+    const params = new URLSearchParams(window.location.search);
+    const sypBase64 = params.get('syp');
+    if (!sypBase64) return false;
+
+    try {
+        const text = atob(sypBase64);
+        const { metadata, parts } = getSYPParts(text);
+
+        const allParts = {};
+        for (const p of parts) {
+            const result = parseSYPPart(text, p.id);
+            allParts[p.id] = {
+                name: p.name,
+                notes: result.notes,
+                timeSignature: result.timeSignature || { beats: 4, beatType: 4 },
+                tempo: result.tempo || 120,
+                pickupDuration: result.pickupDuration || 0
+            };
+        }
+
+        const selectedPart = parts[0].id;
+        const displayName = metadata.title || 'Imported SYP';
+
+        loadCustomSequenceFromImport(allParts, selectedPart, displayName);
+
+        // Remove query parameter from URL without reload
+        const url = new URL(window.location);
+        url.searchParams.delete('syp');
+        window.history.replaceState({}, '', url.pathname + (url.search || ''));
+
+        return true;
+    } catch (err) {
+        console.error('Failed to load SYP from query parameter:', err);
+        return false;
+    }
+}
+
 // Initialize with stored preferences
 setTimeout(() => {
-    // Apply stored mode (default is 'song' if not stored)
-    if (storedPrefs.mode === 'free') {
+    // Check for SYP query parameter first
+    const loadedFromParam = loadSYPFromQueryParam();
+
+    if (loadedFromParam) {
+        // Ensure song mode is active when loading from query parameter
+        if (storedPrefs.mode === 'free') {
+            setMode('song');
+        }
+    } else if (storedPrefs.mode === 'free') {
         setMode('free');
     } else {
         // Song mode is default, just load the sequence
